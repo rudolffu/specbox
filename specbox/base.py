@@ -176,7 +176,7 @@ class DoubleSpec():
         combined_hdu.writeto(self.writename)
         
         
-    def combine1D(self, basepath='./', output=None):
+    def combine1D(self, basepath='./', normalize_left=False, output=None):
         spb = self.spb
         spr = self.spr
         bwave = spb.wave
@@ -201,8 +201,12 @@ class DoubleSpec():
         resampler = LinearInterpolatedResampler(extrapolation_treatment='zero_fill')
         new_spec1 = resampler(spec1, new_disp_grid)
         new_spec2 = resampler(spec2, new_disp_grid)
-        new_spec1.flux.value[spb.len:] = new_spec2.flux.value[spb.len:]
         idxleft2 = int((spr.CRVAL1-spb.CRVAL1)/spb.CD1_1)+2
+        meanjoin_left = np.mean(new_spec1.flux.value[idxleft2:spb.len])
+        meanjoin_right = np.mean(new_spec2.flux.value[idxleft2:spb.len])
+        if normalize_left == True:
+            new_spec1 = new_spec1/meanjoin_left*meanjoin_right
+        new_spec1.flux.value[spb.len:] = new_spec2.flux.value[spb.len:]
         new_spec2.flux.value[:idxleft2] = new_spec1.flux.value[:idxleft2]
         try:
             new_spec1.uncertainty.array[spb.len:] = new_spec2.uncertainty.array[spb.len:]
