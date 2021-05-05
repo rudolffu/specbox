@@ -6,6 +6,7 @@ import re
 import matplotlib.pyplot as plt
 import os
 from PyAstronomy import pyasl
+from pathlib import Path
 
 from astropy.nddata import StdDevUncertainty
 from astropy.table import Table
@@ -23,11 +24,14 @@ class Spiraf():
         if side is not None:
             name = name + side
         self.name = name
-        self.fname = name + ".fits"
-        self.fnametrim = re.sub('\.fits$', 'trim.fits', self.fname)
+        self.fname = os.path.basename(fname)
+        self.fnametrim = re.sub('\.fits$', '_trim.fits', self.fname)
         
         CRVAL1 = hdu[0].header['CRVAL1']
-        CD1_1 = hdu[0].header['CDELT1']
+        try:
+            CD1_1 = hdu[0].header['CD1_1']
+        except:
+            CD1_1 = hdu[0].header['CDELT1']
         CRPIX1 = hdu[0].header['CRPIX1']
         self.CRVAL1 = CRVAL1
         self.CD1_1 = CD1_1
@@ -68,26 +72,22 @@ class Spiraf():
 #         plt.savefig(self.fname.strip(".fits") + '_spec.pdf', dpi=300)
 
 
-    def trim(self, w1='default', w2='default', output='default'):
-        
+    def trim(self, basepath='./', w1=None, w2=None, output=None):
         CRVAL1 = self.CRVAL1
         CD1_1 = self.CD1_1
         CRPIX1 = self.CRPIX1
         dim = self.dim
-        if output == 'default':
-            outputfn = self.fnametrim
+        tpath = basepath+'trimmed/'
+        Path(tpath).mkdir(exist_ok=True)
+        if output is None:
+            outputfn = tpath + self.fnametrim
         else:
-            outputfn = output
-        if not os.path.isfile(outputfn):
-            pass
-        else:
-            raise OSError(f"File {outputfn!r} already exists.")        
+            outputfn = tpath + output        
         try:
             lower = float(w1)
             pix1=int((lower-CRVAL1)/CD1_1+CRPIX1-1)
         except:
             pix1=0
-        
         try:
             upper = float(w2)
             pix2=int((upper-CRVAL1)/CD1_1+CRPIX1-1)
@@ -108,9 +108,9 @@ class Spiraf():
         
         try:
             self.hducopy[0].data = newdata
-            self.hducopy.writeto(outputfn)
+            self.hducopy.writeto(outputfn,overwrite=True)
         except:
-            self.hducopy.writeto(outputfn)
+            self.hducopy.writeto(outputfn,overwrite=True)
             print("Warning: format neither onedspec nor multispec (3d)!\n")
         newwave = np.linspace(CRVAL1, 
                               CRVAL1 + (newlen - CRPIX1) * CD1_1, 
@@ -128,7 +128,7 @@ class Spiraf():
 
 
 class DoubleSpec():
-    def __init__(self, spb=None, spr=None, spbfile=None, sprfile=None, varb=None, varr=None):
+    def __init__(self, spb=None, spr=None, spbfile=None, sprfile=None, varb=None, varr=None, instr=None):
         if spb is None:
             spb = Spiraf(spbfile)
         if spr is None:
@@ -144,7 +144,10 @@ class DoubleSpec():
 #         self.objname = os.path.basename(spb.fname)[0:10]
 #         self.objname = os.path.basename(spb.fname)
         self.objname = fits.getheader(spbfile)['object']
-        self.writename = self.objname + "_anu_comb.fits"
+        if instr is not None:
+            self.writename = self.objname + "_" + str(instr) + "_comb.fits"
+        else:
+            self.writename = self.objname + "_comb.fits"
     
     def combine(self,output=None):
         spb = self.spb
@@ -152,7 +155,6 @@ class DoubleSpec():
         bwave = spb.wave
         rwave = spr.wave
         new_disp_grid = np.arange(bwave[0], rwave[-1], spb.CD1_1) * u.AA
-        linear = LinearInterpolatedResampler()
         newdata = np.empty([4,1,len(new_disp_grid)])
         for i in range(4):
             spec1 = Spectrum1D(spectral_axis=bwave*u.AA, 
@@ -174,13 +176,14 @@ class DoubleSpec():
         combined_hdu.writeto(self.writename)
         
         
-    def combine1D(self,output=None):
+    def combine1D(self, basepath='./', output=None):
         spb = self.spb
         spr = self.spr
         bwave = spb.wave
         rwave = spr.wave
+        cpath = basepath+'combined/'
+        Path(cpath).mkdir(exist_ok=True)
         new_disp_grid = np.arange(bwave[0], rwave[-1], spb.CD1_1) * u.AA
-        linear = LinearInterpolatedResampler()
         if self.varb:
             spec1 = Spectrum1D(spectral_axis=bwave*u.AA, 
                                flux=spb.data* u.Unit('erg cm-2 s-1 AA-1'),
@@ -221,7 +224,7 @@ class DoubleSpec():
             fluxerr= uncert
         else:
             fluxerr=None
-        pyasl.write1dFitsSpec(self.writename, 
+        pyasl.write1dFitsSpec(cpath+self.writename, 
                               flux, 
                               wvl=wvl, 
                               clobber=True,
