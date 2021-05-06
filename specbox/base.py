@@ -105,15 +105,16 @@ class Spiraf():
         else:
             print("Warning: format neither onedspec nor multispec (3d)!\n")
         self.newdata = newdata
-        
+        newCRVAL1 = self.wave[pix1]
+        self.hducopy[0].header['CRVAL1'] = newCRVAL1
         try:
             self.hducopy[0].data = newdata
             self.hducopy.writeto(outputfn,overwrite=True)
         except:
             self.hducopy.writeto(outputfn,overwrite=True)
             print("Warning: format neither onedspec nor multispec (3d)!\n")
-        newwave = np.linspace(CRVAL1, 
-                              CRVAL1 + (newlen - CRPIX1) * CD1_1, 
+        newwave = np.linspace(newCRVAL1, 
+                              newCRVAL1 + (newlen - CRPIX1) * CD1_1, 
                               newlen)
         
         plt.figure(figsize=(8, 6))
