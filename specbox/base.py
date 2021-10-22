@@ -6,27 +6,52 @@ import re
 import matplotlib.pyplot as plt
 import os
 from PyAstronomy import pyasl
+from scipy.signal import savgol_filter
 from pathlib import Path
-
 from astropy.nddata import StdDevUncertainty
 from astropy.table import Table
 from astropy import units as u
 from specutils import Spectrum1D,SpectrumCollection
 from specutils.manipulation import FluxConservingResampler, LinearInterpolatedResampler, SplineInterpolatedResampler
+from .auxmodule import *
 
 
 class Spiraf():
-    def __init__(self, fname, side=None):
+    def __init__(self, fname, redshift=None, ra=None, dec=None, 
+                 telescope=None, side=None):
         hdu = fits.open(fname)
+        header = hdu[0].header
+        objname = header['object']
         self.hdu = hdu
         self.hducopy = hdu.copy()
-        name = fits.getheader(fname)['object']
+        self.fname = os.path.basename(fname)
+        self.fnametrim = re.sub('\.fits$', '_trim.fits', self.fname)
+        if redshift is None:
+            try:
+                redshift = float(header['redshift'])
+            except:
+                print("Redshift not provided, setting redshift to zero.")
+                redshift = 0
+        if ra is None or dec is None:
+            try:
+                ra = float(header['ra'])
+                dec = float(header['dec'])
+            except:
+                coord = SkyCoord(header['RA']+header['DEC'], 
+                                 frame='icrs',
+                                 unit=(u.hourangle, u.deg))
+                ra = coord.ra.value
+                dec = coord.dec.value
+        if 'J' in objname:
+            try:
+                name = designation(ra, dec, telescope)
+            except:
+                name = objname
+        else:
+            name = objname
         if side is not None:
             name = name + side
         self.name = name
-        self.fname = os.path.basename(fname)
-        self.fnametrim = re.sub('\.fits$', '_trim.fits', self.fname)
-        
         CRVAL1 = hdu[0].header['CRVAL1']
         try:
             CD1_1 = hdu[0].header['CD1_1']
@@ -57,7 +82,24 @@ class Spiraf():
         else:
             print("Warning: format neither onedspec nor multispec (3d)!\n")
 #         hdu.close()
-            
+
+    def smooth(self, window_length, polyorder, **kwargs):
+        """
+        Smooth the spectrum with scipy.signal.savgol_filter.
+        Parameters:
+        ----------
+            window_length : int
+                The length of the filter window (i.e., the number of coefficients).
+                `window_length` must be a positive odd integer. If `mode` is 'interp',
+                `window_length` must be less than or equal to the size of `x`.
+            polyorder : int
+                The order of the polynomial used to fit the samples.
+                `polyorder` must be less than `window_length`.
+        """
+        self.flux_sm = savgol_filter(self.flux,
+                                     window_length=window_length,
+                                     polyorder=polyorder,
+                                     **kwargs)            
 
     def plot(self, axlim='auto'):
         
@@ -68,7 +110,8 @@ class Spiraf():
         # plt.ylim(bottom=0)
         plt.xlabel(r'$\mathrm{Wavelength(\AA})$')
         plt.ylabel(r'$\mathrm{Flux(erg/s/cm^{2}/\AA)}$')
-        plt.title('Spectrum of ' + self.name.replace('_', ' '))
+        # plt.title('Spectrum of ' + self.name.replace('_', ' '))
+        plt.title(self.name.replace('_', ' '))
 #         plt.savefig(self.fname.strip(".fits") + '_spec.pdf', dpi=300)
 
 
