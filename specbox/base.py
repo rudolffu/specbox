@@ -61,24 +61,27 @@ class Spiraf():
         self.CRVAL1 = CRVAL1
         self.CD1_1 = CD1_1
         self.CRPIX1 = CRPIX1
+        W1 = (1-CRPIX1) * CD1_1 + CRVAL1
         data = hdu[0].data
         self.data = data
         dim = len(data.shape)
         self.dim = dim
         if dim==1:
-            l = len(data)
-            self.len = l
-            self.wave = np.linspace(CRVAL1, 
-                                    CRVAL1 + (l - CRPIX1) * CD1_1, 
-                                    l)
+            num_pt = len(data)
+            self.len = num_pt
+            self.wave = np.linspace(W1, 
+                                    W1 + (num_pt - 1) * CD1_1, 
+                                    num=num_pt)
             self.flux = data
+            self.error = None
         elif dim==3:
-            l = data.shape[2]
-            self.len = l
-            self.wave = np.linspace(CRVAL1, 
-                                    CRVAL1 + (l - CRPIX1) * CD1_1, 
-                                    l)
+            num_pt = len(data)
+            self.len = num_pt
+            self.wave = np.linspace(W1, 
+                                    W1 + (num_pt - 1) * CD1_1, 
+                                    num=num_pt)
             self.flux = data[0,0,:]
+            self.error = data[3,0,:]
         else:
             print("Warning: format neither onedspec nor multispec (3d)!\n")
 #         hdu.close()
