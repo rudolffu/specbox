@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 from astropy.io import fits
 import numpy as np
+import pandas as pd
 from glob import glob
 import re
 import matplotlib.pyplot as plt
@@ -12,7 +13,7 @@ from astropy.nddata import StdDevUncertainty
 from astropy.table import Table
 from astropy import units as u
 from specutils import Spectrum1D,SpectrumCollection
-from specutils.manipulation import FluxConservingResampler, LinearInterpolatedResampler, SplineInterpolatedResampler
+from specutils.manipulation import FluxConservingResampler, LinearInterpolatedResampler, SplineInterpolatedResampler, median_smooth
 from .auxmodule import *
 
 
@@ -298,7 +299,7 @@ class DoubleSpec():
 
 
 class SdssSpec():
-    def __init__(self, fname, redshift=None, perform_rest=False, medsmooth=False):
+    def __init__(self, fname, redshift=None, perform_rest=False):
         hdu = fits.open(fname)
         basename = os.path.basename(fname)
         self.basename = basename
@@ -331,8 +332,6 @@ class SdssSpec():
         self.spec = Spectrum1D(spectral_axis=wave, 
                                flux=flux, 
                                uncertainty=StdDevUncertainty(err))
-        if medsmooth == True:
-            self.spec = median_smooth(self.spec, width=5)
         if perform_rest == True:
             self.to_restframe()
 
