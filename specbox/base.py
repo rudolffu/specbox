@@ -15,6 +15,7 @@ from astropy import units as u
 from specutils import Spectrum1D,SpectrumCollection
 from specutils.manipulation import FluxConservingResampler, LinearInterpolatedResampler, SplineInterpolatedResampler, median_smooth
 from .auxmodule import *
+import warnings
 
 
 class Spiraf():
@@ -76,7 +77,7 @@ class Spiraf():
             self.flux = data
             self.error = None
         elif dim==3:
-            num_pt = len(data)
+            num_pt = data.shape[2]
             self.len = num_pt
             self.wave = np.linspace(W1, 
                                     W1 + (num_pt - 1) * CD1_1, 
