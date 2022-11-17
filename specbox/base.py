@@ -8,14 +8,19 @@ import matplotlib.pyplot as plt
 import os
 from PyAstronomy import pyasl
 from scipy.signal import savgol_filter
+from scipy.stats import sigmaclip
 from pathlib import Path
-from astropy.nddata import StdDevUncertainty
+from astropy.nddata import StdDevUncertainty,VarianceUncertainty,InverseVariance
 from astropy.table import Table
 from astropy import units as u
-from specutils import Spectrum1D,SpectrumCollection
+from specutils import Spectrum1D,SpectrumCollection,SpectrumList
 from specutils.manipulation import FluxConservingResampler, LinearInterpolatedResampler, SplineInterpolatedResampler, median_smooth
 from .auxmodule import *
 import warnings
+# import asdf
+from astropy.units import Quantity
+# from gwcs.wcstools import grid_from_bounding_box
+
 
 
 class Spiraf():
@@ -425,3 +430,99 @@ class SdssSpec():
         plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
         plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
         plt.title(self.basename)
+
+
+class NIRSpecS3d():
+    
+    def __init__(self, fname):
+        hdu = fits.open(fname)
+        basename = os.path.basename(fname)
+        self.basename = basename
+        hdr = hdu[0].header
+        sci = hdu[1].data
+        sci_hdr = hdu[1].header
+        # err = hdu[2].data
+        # dq = hdu[3].data
+        # wmap = hdu[4].data
+        # hdrtab = Table(hdu[5].data)
+        # data = {'hdr': hdr,
+        #         'sci_hdr': sci_hdr,
+        #         'sci': sci,
+        #         'err': err,
+        #         'dq': dq,
+        #         'wmap': wmap,
+        #         'hdrtab': hdrtab}
+        # self.data = data
+        sci = savgol_filter(sci,
+                            window_length=25,
+                            polyorder=3,
+                            axis=0)
+            #     for i in range(sci.shape[1]):
+            # for j in range(sci.shape[2]):
+            #     sci[:,i,j] = sigmaclip(sci[:,i,j])    
+        sci_unit = u.Unit(sci_hdr['BUNIT'])
+        wave_unit = u.Unit(sci_hdr['CUNIT3'])
+        self.sci_unit = sci_unit
+        self.wave_unit = wave_unit
+        CRVAL3 = sci_hdr['CRVAL3']
+        CDELT3 = sci_hdr['CDELT3']
+        CRPIX3 = sci_hdr['CRPIX3']
+        self.CRVAL3 = CRVAL3
+        self.CDELT3 = CDELT3
+        self.CRPIX3 = CRPIX3
+        W1 = (1-CRPIX3) * CDELT3 + CRVAL3
+        sci_shape = sci.shape
+        dim = len(sci.shape)
+        self.dim = dim
+        if dim==3:
+            num_pt = sci_shape[0]
+            self.len = num_pt
+            wave = np.linspace(W1, 
+                               W1 + (num_pt - 1) * CDELT3, 
+                               num=num_pt)
+            self.wave = wave
+        else:
+            print('Not implemented.')
+        # with asdf.open(fname) as af:
+        #     wcslist = [af.tree["meta"]["wcs"]]
+        # spectra = []
+        # for hdu, wcs in zip(hdu, wcslist):
+        sci[sci<=0]==np.nan
+        flux_array = sci.T
+        flux = Quantity(flux_array, unit=sci_unit)
+        wavelength = Quantity(wave, unit=wave_unit)
+        # grid = grid_from_bounding_box(wcs.bounding_box)[:, :, 0, 0]
+        # _, _, wavelength_array = wcs(*grid)
+        # _, _, wavelength_unit = wcs.output_frame.unit
+        # Merge primary and slit headers and dump into meta
+        slit_header = sci_hdr
+        header = hdr.copy()
+        header.extend(slit_header, strip=True, update=True)
+        meta = {'header': header}
+
+        # get uncertainty information
+        ext_name = hdr.get("ERREXT", "ERR")
+        err_type = hdu[ext_name].header.get("ERRTYPE", 'ERR')
+        err_unit = hdu[ext_name].header.get("BUNIT", None)
+        err_array = hdu[ext_name].data.T
+
+        # ERRTYPE can be one of "ERR", "IERR", "VAR", "IVAR"
+        # but mostly ERR for JWST cubes
+        # see https://jwst-pipeline.readthedocs.io/en/latest/jwst/data_products/science_products.html#s3d
+        if err_type == "ERR":
+            err = StdDevUncertainty(err_array, unit=err_unit)
+        elif err_type == 'VAR':
+            err = VarianceUncertainty(err_array, unit=err_unit)
+        elif err_type == 'IVAR':
+            err = InverseVariance(err_array, unit=err_unit)
+        elif err_type == 'IERR':
+            warnings.warn("Inverse error is not yet a supported astropy.nddata "
+                          "uncertainty. Setting err to None.")
+            err = None
+
+        # get mask information
+        mask_name = hdr.get("MASKEXT", "DQ")
+        mask = hdu[mask_name].data.T
+        spec = Spectrum1D(flux=flux, spectral_axis=wavelength, meta=meta,
+                          uncertainty=err, mask=mask) 
+        self.spec1d = spec
