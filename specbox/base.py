@@ -44,7 +44,7 @@ class Spiraf():
                 ra = float(header['ra'])
                 dec = float(header['dec'])
             except:
-                coord = SkyCoord(header['RA']+header['DEC'], 
+                coord = SkyCoord(header['RA']+' '+header['DEC'], 
                                  frame='icrs',
                                  unit=(u.hourangle, u.deg))
                 ra = coord.ra.value
@@ -333,6 +333,7 @@ class SdssSpec():
         ivar_safe = ivar.interpolate()
         err = 1./np.sqrt(ivar_safe.values) * 10**-17
         self.wave = wave
+        self.loglam = data['loglam']
         self.flux = flux
         self.err = err    
         self.spec = Spectrum1D(spectral_axis=wave, 
@@ -391,9 +392,9 @@ class SdssSpec():
             self.spec = self.trimmed_spec
             self._copy_spec_attr()
         
-    def plot(self):
-        plt.figure()
-        plt.plot(self.spec.spectral_axis, self.spec.flux)
+    def plot(self, fig_num=0):
+        plt.figure(num=fig_num, figsize=(16, 6))
+        plt.plot(self.spec.spectral_axis, self.spec.flux, lw=1, c='k')
         # plt.plot(self.spec.spectral_axis, self.err)
         plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
         plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
