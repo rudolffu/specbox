@@ -391,6 +391,13 @@ class SdssSpec():
         if inplace == True:
             self.spec = self.trimmed_spec
             self._copy_spec_attr()
+
+    def slice(self, idx1, idx2, inplace=False):
+        self.trimmed_spec = self.spec[idx1:idx2]
+        if inplace == True:
+            self.spec = self.trimmed_spec
+            self.loglam = self.loglam[idx1:idx2]
+            self._copy_spec_attr()
         
     def plot(self, fig_num=0):
         plt.figure(num=fig_num, figsize=(16, 6))
