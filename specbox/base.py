@@ -21,24 +21,264 @@ import warnings
 from astropy.units import Quantity
 # from gwcs.wcstools import grid_from_bounding_box
 
+class ConvenientSpecMixin():
+    def __init__(self, wave=None, flux=None, err=None, 
+                 wave_unit=None, flux_unit=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if wave_unit is not None:
+            self.wave_unit = wave_unit
+        else:
+            self.wave_unit = u.angstrom
+        if flux_unit is not None:
+            self.flux_unit = flux_unit
+        else:
+            self.flux_unit = u.dimensionless_unscaled
+        self.wave = wave
+        self.flux = flux
+        self.err = err
+
+    @property
+    def _length(self):
+        return len(self.flux)
+    
+    @property
+    def flux_unit(self):
+        return self._flux_unit
+    
+    @flux_unit.setter
+    def flux_unit(self, unit):
+        try:
+            self.flux = self.flux.to(unit)
+        except:
+            pass
+        self._flux_unit = unit
+
+    @property
+    def flux(self):
+        return self._flux
+    
+    @flux.setter
+    def flux(self, flux):
+        if flux is not None:
+            self._flux = self._make_flux_quantity(flux)
+        else:
+            self._flux = None
+    
+    @property
+    def wave_unit(self):
+        return self._wave_unit
+    
+    @wave_unit.setter
+    def wave_unit(self, unit):
+        try:
+            self.wave = self.wave.to(unit)
+        except:
+            pass
+        self._wave_unit = unit
+
+    @property
+    def wave(self):
+        return self._wave
+    
+    @wave.setter
+    def wave(self, wave):
+        if wave is not None:
+            self._wave = self._make_wave_quantity(wave)
+        else:
+            self._wave = None
+
+    @property
+    def err(self):
+        return self._err
+    
+    @err.setter
+    def err(self, err):
+        self._err = err
+
+    @property
+    def spec(self):
+        return self._spec
+    
+    @spec.setter
+    def spec(self, spec):
+        self._spec = spec
+        self.wave = spec.spectral_axis
+        self.flux = spec.flux
+        if self._has_uncertainty():
+            self.err = spec.uncertainty.array
+        
+    def _make_flux_quantity(self, flux):
+        if not isinstance(flux, Quantity):
+            flux = flux * self.flux_unit
+        return flux
+    
+    def _make_wave_quantity(self, wave):
+        if not isinstance(wave, Quantity):
+            wave = wave * self.wave_unit
+        return wave
+    
+    def _has_uncertainty(self):
+        return self.spec.uncertainty is not None
+    
+    def trim(self, wave_range, inplace=True):
+        wave = self.wave.value
+        idx = (wave >= wave_range[0]) & (wave <= wave_range[1])
+        # if not inplace:
+        #     return self.copy().trim(wave_range, inplace=True)
+        self.wave = self.wave[idx]
+        self.flux = self.flux[idx]
+        if self._has_uncertainty():
+            self.err = self.err[idx]
+        return self
+    
+    def flux_conserve_resample(self, wave, inplace=False):
+        if not inplace:
+            return self.copy().flux_conserve_resample(wave, inplace=True)
+        resampler = FluxConservingResampler()
+        self.spec = resampler(self.spec, wave)
+        self.wave = self.spec.spectral_axis
+        self.flux = self.spec.flux
+        return self
+    
+    def smooth(self, window_length, polyorder, plot=True, inplace=False, **kwargs):
+        """
+        Smooth the spectrum with scipy.signal.savgol_filter.
+        Parameters:
+        ----------
+            window_length : int
+                The length of the filter window (i.e., the number of coefficients).
+                `window_length` must be a positive odd integer. If `mode` is 'interp',
+                `window_length` must be less than or equal to the size of `x`.
+            polyorder : int
+                The order of the polynomial used to fit the samples.
+                `polyorder` must be less than `window_length`.
+        """
+        flux_sm = savgol_filter(self.flux.value,
+                                window_length=window_length,
+                                polyorder=polyorder,
+                                **kwargs) 
+        flux_sm = flux_sm * self.flux.unit
+        self.flux_sm = flux_sm
+        if inplace == True:
+            self.flux_ori = self.flux
+            self.flux = flux_sm
+            self.spec = Spectrum1D(spectral_axis=self.wave, 
+                                   flux=self.flux_sm, 
+                                   uncertainty=StdDevUncertainty(self.err)) 
+        if plot == True:
+            plt.figure(num=0, figsize=(16, 6))
+            plt.plot(self.spec.spectral_axis, self.flux_sm.data, lw=1, c='k')
+            # plt.plot(self.spec.spectral_axis, self.err)
+            plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
+            plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
+        return self
+    
+    def plot(self, ax=None, **kwargs):
+        if ax is None:
+            fig, ax = plt.subplots()
+        ax.plot(self.wave, self.flux, **kwargs)
+        ax.set_xlabel("Wavelength ({})".format(self.wave.unit))
+        ax.set_ylabel("Flux ({})".format(self.flux.unit))
+        return ax
+    
+    def copy(self):
+        return self.__class__(self.wave, self.flux, self.err)
+    
+class SpecIOMixin():
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._filename = None
+        self._basename = None
+        self._objname = None
+        self._ra = None
+        self._dec = None
+        self._redshift = None
+        self._plateid = None
+        self._mjd = None
+        self._fiberid = None
+        self._and_mask = None
+        self._or_mask = None
+
+    def read(self, filename, **kwargs):
+        self.basename = os.path.basename(filename)
+        hdu = fits.open(filename)
+        self.hdr = hdu[0].header
+        self.data = hdu[0].data
+
+    def write(self, filename, **kwargs):
+        hdu = fits.PrimaryHDU(self.data, header=self.hdr)
+        hdu.writeto(filename, overwrite=True)
 
 
-class Spiraf():
-    def __init__(self, fname, redshift=None, ra=None, dec=None, 
-                 telescope=None, side=None):
-        hdu = fits.open(fname)
-        header = hdu[0].header
-        objname = header['object']
-        self.hdu = hdu
-        self.hducopy = hdu.copy()
-        self.fname = os.path.basename(fname)
-        self.fnametrim = re.sub('\.fits$', '_trim.fits', self.fname)
-        if redshift is None:
-            try:
-                redshift = float(header['redshift'])
-            except:
-                print("Redshift not provided, setting redshift to zero.")
-                redshift = 0
+class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._filename = None
+        self._basename = None
+        self._objname = None
+        self._ra = None
+        self._dec = None
+        self._redshift = None
+        self._plateid = None
+        self._mjd = None
+        self._fiberid = None
+        self._and_mask = None
+        self._or_mask = None
+
+    def read(self, filename, **kwargs):
+        super().read(filename, **kwargs)
+        self.basename = os.path.basename(filename)
+        self.wave = 10**self.data['loglam']
+        self.flux = self.data['flux']
+        self.err = self.data['ivar']**-0.5
+        self.redshift = self.hdr['Z']
+        self.ra = self.hdr['RA']
+        self.dec = self.hdr['DEC']
+        self.objname = self.hdr['OBJNAME']
+        self.plateid = self.hdr['PLATEID']
+        self.mjd = self.hdr['MJD']
+        self.fiberid = self.hdr['FIBERID']
+        self.and_mask = self.hdr['AND_MASK']
+        self.or_mask = self.hdr['OR_MASK']
+        self.spec = Spectrum1D(spectral_axis=self.wave, flux=self.flux, 
+                               uncertainty=StdDevUncertainty(self.err))
+        self.filename = filename
+
+    def write(self, filename, **kwargs):
+        self.data = Table([self.wave, self.flux, self.err], 
+                          names=['loglam', 'flux', 'ivar'])
+        self.hdr = fits.Header()
+        self.hdr['Z'] = self.redshift
+        self.hdr['RA'] = self.ra
+        self.hdr['DEC'] = self.dec
+        self.hdr['OBJNAME'] = self.objname
+        self.hdr['PLATEID'] = self.plateid
+        self.hdr['MJD'] = self.mjd
+        self.hdr['FIBERID'] = self.fiberid
+        self.hdr['AND_MASK'] = self.and_mask
+        self.hdr['OR_MASK'] = self.or_mask
+        super().write(filename, **kwargs)
+
+class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.wave_unit=u.AA
+        self.flux_unit=u.erg/u.s/u.cm**2/u.AA
+        self.wave = None
+        self.flux = None
+        self.err = None
+        self.telescope = kwargs.get('telescope', None)
+        self.side = kwargs.get('side', None)
+
+    def read(self, filename, **kwargs):
+        super().read(filename, **kwargs)
+        header = self.hdr
+        data = self.data
+        ra = kwargs.get('ra', None)
+        dec = kwargs.get('dec', None)
+        objname = header['OBJECT']
+        telescope = kwargs.get('telescope', self.telescope)
+        side = kwargs.get('side', self.side)
         if ra is None or dec is None:
             try:
                 ra = float(header['ra'])
@@ -58,19 +298,19 @@ class Spiraf():
             name = objname
         if side is not None:
             name = name + side
-        self.name = name
-        CRVAL1 = hdu[0].header['CRVAL1']
+        self.objname = name
+        CRVAL1 = header['CRVAL1']
         try:
-            CD1_1 = hdu[0].header['CD1_1']
+            CD1_1 = header['CD1_1']
         except:
-            CD1_1 = hdu[0].header['CDELT1']
-        CRPIX1 = hdu[0].header['CRPIX1']
+            CD1_1 = header['CDELT1']
+        CRPIX1 = header['CRPIX1']
         self.CRVAL1 = CRVAL1
         self.CD1_1 = CD1_1
         self.CRPIX1 = CRPIX1
         W1 = (1-CRPIX1) * CD1_1 + CRVAL1
-        data = hdu[0].data
-        self.data = data
+        # data = hdu[0].data
+        # self.data = data
         dim = len(data.shape)
         self.dim = dim
         if dim==1:
@@ -78,107 +318,253 @@ class Spiraf():
             self.len = num_pt
             self.wave = np.linspace(W1, 
                                     W1 + (num_pt - 1) * CD1_1, 
-                                    num=num_pt)
-            self.flux = data
-            self.error = None
+                                    num=num_pt) * self.wave_unit
+            self.flux = data * self.flux_unit
+            self.err = np.zeros_like(self.flux)
         elif dim==3:
             num_pt = data.shape[2]
             self.len = num_pt
             self.wave = np.linspace(W1, 
                                     W1 + (num_pt - 1) * CD1_1, 
-                                    num=num_pt)
-            self.flux = data[0,0,:]
-            self.error = data[3,0,:]
+                                    num=num_pt) * self.wave_unit
+            self.flux = data[0,0,:]  * self.flux_unit
+            self.err = data[3,0,:]
         else:
             print("Warning: format neither onedspec nor multispec (3d)!\n")
-#         hdu.close()
-
-    def smooth(self, window_length, polyorder, **kwargs):
-        """
-        Smooth the spectrum with scipy.signal.savgol_filter.
-        Parameters:
-        ----------
-            window_length : int
-                The length of the filter window (i.e., the number of coefficients).
-                `window_length` must be a positive odd integer. If `mode` is 'interp',
-                `window_length` must be less than or equal to the size of `x`.
-            polyorder : int
-                The order of the polynomial used to fit the samples.
-                `polyorder` must be less than `window_length`.
-        """
-        self.flux_sm = savgol_filter(self.flux,
-                                     window_length=window_length,
-                                     polyorder=polyorder,
-                                     **kwargs)            
-
-    def plot(self, axlim='auto'):
-        
-        plt.figure(figsize=(8, 6))
-        plt.plot(self.wave, self.flux, lw=1)
-        # plt.xlim(xrange)
-        # plt.xlim(3800, 8300)
-        # plt.ylim(bottom=0)
-        plt.xlabel(r'$\mathrm{Wavelength(\AA})$')
-        plt.ylabel(r'$\mathrm{Flux(erg/s/cm^{2}/\AA)}$')
-        # plt.title('Spectrum of ' + self.name.replace('_', ' '))
-        plt.title(self.name.replace('_', ' '))
-#         plt.savefig(self.fname.strip(".fits") + '_spec.pdf', dpi=300)
+        self.spec = Spectrum1D(spectral_axis=self.wave, 
+                               flux=self.flux, 
+                               uncertainty=StdDevUncertainty(self.err))
+        # return self
 
 
-    def trim(self, basepath='./', w1=None, w2=None, output=None):
-        CRVAL1 = self.CRVAL1
-        CD1_1 = self.CD1_1
-        CRPIX1 = self.CRPIX1
-        dim = self.dim
-        tpath = basepath+'trimmed/'
-        Path(tpath).mkdir(exist_ok=True)
-        if output is None:
-            outputfn = tpath + self.fnametrim
-        else:
-            outputfn = tpath + output        
-        try:
-            lower = float(w1)
-            pix1=int((lower-CRVAL1)/CD1_1+CRPIX1-1)
-        except:
-            pix1=0
-        try:
-            upper = float(w2)
-            pix2=int((upper-CRVAL1)/CD1_1+CRPIX1-1)
-        except:
-            pix2=self.len
-        
-        if dim==1:
-            newdata = self.data[pix1:pix2]
-            newlen = len(newdata)
-            newflux = newdata
-        elif dim==3:
-            newdata = self.data[:,:,pix1:pix2]
-            newlen = newdata.shape[2]
-            newflux = newdata[0,0,:]
-        else:
-            print("Warning: format neither onedspec nor multispec (3d)!\n")
-        self.newdata = newdata
-        newCRVAL1 = self.wave[pix1]
-        self.hducopy[0].header['CRVAL1'] = newCRVAL1
-        try:
-            self.hducopy[0].data = newdata
-            self.hducopy.writeto(outputfn,overwrite=True)
-        except:
-            self.hducopy.writeto(outputfn,overwrite=True)
-            print("Warning: format neither onedspec nor multispec (3d)!\n")
-        newwave = np.linspace(newCRVAL1, 
-                              newCRVAL1 + (newlen - CRPIX1) * CD1_1, 
-                              newlen)
-        
-        plt.figure(figsize=(8, 6))
-        plt.plot(newwave, newflux, lw=1)
-        plt.xlabel(r'$\mathrm{Wavelength(\AA})$')
-        plt.ylabel(r'$\mathrm{Flux(erg/s/cm^{2}/\AA)}$')
-        plt.title('Spectrum of ' + self.name.replace('_', ' '))
+
+#     def smooth(self, window_length, polyorder, plot=True, inplace=False, **kwargs):
+#         """
+#         Smooth the spectrum with scipy.signal.savgol_filter.
+#         Parameters:
+#         ----------
+#             window_length : int
+#                 The length of the filter window (i.e., the number of coefficients).
+#                 `window_length` must be a positive odd integer. If `mode` is 'interp',
+#                 `window_length` must be less than or equal to the size of `x`.
+#             polyorder : int
+#                 The order of the polynomial used to fit the samples.
+#                 `polyorder` must be less than `window_length`.
+#         """
+#         flux_sm = savgol_filter(self.flux,
+#                                 window_length=window_length,
+#                                 polyorder=polyorder,
+#                                 **kwargs) 
+#         flux_sm = flux_sm * u.Unit('erg cm-2 s-1 AA-1') 
+#         self.flux_sm = flux_sm
+#         if inplace == True:
+#             self.flux_ori = self.flux
+#             self.flux = flux_sm
+#             self.spec = Spectrum1D(spectral_axis=self.wave, 
+#                                    flux=self.flux_sm, 
+#                                    uncertainty=StdDevUncertainty(self.err)) 
+#         if plot == True:
+#             plt.figure(num=0, figsize=(16, 6))
+#             plt.plot(self.spec.spectral_axis, self.flux_sm.data, lw=1, c='k')
+#             # plt.plot(self.spec.spectral_axis, self.err)
+#             plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
+#             plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
             
-    def close(self):
-        self.hducopy.close()
-        self.hdu.close()
+#     def to_restframe(self):
+#         z = self.redshift
+#         if hasattr(self, 'spec_z'):
+#             warnings.warn('Rest-frame spectrum already exisits. \
+#                            Spectrum unchanged.', UserWarning)
+#             return
+#         if z is not None:
+#             self.wave /= (1+z)
+#             self.flux *= (1+z)
+#             self.err *= (1+z)
+#             self.spec_z = self.spec
+#             self.spec = Spectrum1D(spectral_axis=self.wave, 
+#                                    flux=self.flux, 
+#                                    uncertainty=StdDevUncertainty(self.err))
+    
+#     def trim_resample(self, wave_range, step, inplace=False):
+#         new_disp_grid = np.arange(wave_range[0], wave_range[1], step) * u.AA
+#         resampler = SplineInterpolatedResampler()
+#         self.trimmed_spec = resampler(self.spec, new_disp_grid) 
+#         if inplace == True:
+#             self.spec = self.trimmed_spec
+#             self._copy_spec_attr()
+
+#     def slice(self, idx1, idx2, inplace=False):
+#         self.trimmed_spec = self.spec[idx1:idx2]
+#         if inplace == True:
+#             self.spec = self.trimmed_spec
+#             self.loglam = self.loglam[idx1:idx2]
+#             self._copy_spec_attr()
+        
+#     def plot(self, fig_num=0):
+#         plt.figure(num=fig_num, figsize=(16, 6))
+#         plt.plot(self.spec.spectral_axis, self.spec.flux, lw=1, c='k')
+#         # plt.plot(self.spec.spectral_axis, self.err)
+#         plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
+#         plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
+#         if self.objname is not None:
+#             plt.title(self.objname)
+#         if self.objname is None and self.basename is not None:
+#             plt.title(self.basename)
+# #         plt.show()
+        
+#     def _copy_spec_attr(self):
+#         self.wave = self.spec.spectral_axis
+#         self.flux = self.spec.flux
+#         self.err = self.spec.uncertainty.array
+
+
+# class Spiraf(SpecBase):
+#     def __init__(self, fname, redshift=None, ra=None, dec=None, 
+#                  objname=None, perform_rest=False,
+#                  telescope=None, side=None):
+#         hdu = fits.open(fname)
+#         header = hdu[0].header
+#         self.hdu = hdu
+#         self.hducopy = hdu.copy()
+#         objname = header['object']
+#         self.fname = os.path.basename(fname)
+#         basename = os.path.basename(fname)
+#         self.basename = basename
+#         self.fnametrim = re.sub('\.fits$', '_trim.fits', self.fname)
+#         if redshift is None:
+#             try:
+#                 redshift = float(header['redshift'])
+#             except:
+#                 print("Redshift not provided, setting redshift to zero.")
+#                 redshift = 0
+#         if ra is None or dec is None:
+#             try:
+#                 ra = float(header['ra'])
+#                 dec = float(header['dec'])
+#             except:
+#                 coord = SkyCoord(header['RA']+' '+header['DEC'], 
+#                                  frame='icrs',
+#                                  unit=(u.hourangle, u.deg))
+#                 ra = coord.ra.value
+#                 dec = coord.dec.value
+#         if 'J' in objname:
+#             try:
+#                 name = designation(ra, dec, telescope)
+#             except:
+#                 name = objname
+#         else:
+#             name = objname
+#         if side is not None:
+#             name = name + side
+#         self.objname = name
+#         CRVAL1 = hdu[0].header['CRVAL1']
+#         try:
+#             CD1_1 = hdu[0].header['CD1_1']
+#         except:
+#             CD1_1 = hdu[0].header['CDELT1']
+#         CRPIX1 = hdu[0].header['CRPIX1']
+#         self.CRVAL1 = CRVAL1
+#         self.CD1_1 = CD1_1
+#         self.CRPIX1 = CRPIX1
+#         W1 = (1-CRPIX1) * CD1_1 + CRVAL1
+#         data = hdu[0].data
+#         self.data = data
+#         dim = len(data.shape)
+#         self.dim = dim
+#         if dim==1:
+#             num_pt = len(data)
+#             self.len = num_pt
+#             self.wave = np.linspace(W1, 
+#                                     W1 + (num_pt - 1) * CD1_1, 
+#                                     num=num_pt) * u.AA
+#             self.flux = data * u.Unit('erg cm-2 s-1 AA-1') 
+#             self.err = None
+#             self.spec = Spectrum1D(spectral_axis=self.wave, 
+#                                    flux=self.flux)
+#         elif dim==3:
+#             num_pt = data.shape[2]
+#             self.len = num_pt
+#             self.wave = np.linspace(W1, 
+#                                     W1 + (num_pt - 1) * CD1_1, 
+#                                     num=num_pt) * u.AA
+#             self.flux = data[0,0,:]  * u.Unit('erg cm-2 s-1 AA-1') 
+#             self.err = data[3,0,:]
+#             self.spec = Spectrum1D(spectral_axis=self.wave, 
+#                                    flux=self.flux, 
+#                                    uncertainty=StdDevUncertainty(self.err))
+#         else:
+#             print("Warning: format neither onedspec nor multispec (3d)!\n")
+#         self.perform_rest = perform_rest
+#         if perform_rest == True:
+#             self.to_restframe()
+# #         hdu.close()         
+
+# #     def plot(self, axlim='auto'):
+# #         plt.figure(figsize=(8, 6))
+# #         plt.plot(self.wave, self.flux, lw=1)
+# #         # plt.xlim(xrange)
+# #         # plt.xlim(3800, 8300)
+# #         # plt.ylim(bottom=0)
+# #         plt.xlabel(r'$\mathrm{Wavelength(\AA})$')
+# #         plt.ylabel(r'$\mathrm{Flux(erg/s/cm^{2}/\AA)}$')
+# #         # plt.title('Spectrum of ' + self.name.replace('_', ' '))
+# #         plt.title(self.name.replace('_', ' '))
+# # #         plt.savefig(self.fname.strip(".fits") + '_spec.pdf', dpi=300)
+
+    # def trim(self, basepath='./', w1=None, w2=None, output=None):
+    #     CRVAL1 = self.CRVAL1
+    #     CD1_1 = self.CD1_1
+    #     CRPIX1 = self.CRPIX1
+    #     dim = self.dim
+    #     tpath = basepath+'trimmed/'
+    #     Path(tpath).mkdir(exist_ok=True)
+    #     if output is None:
+    #         outputfn = tpath + self.fnametrim
+    #     else:
+    #         outputfn = tpath + output        
+    #     try:
+    #         lower = float(w1)
+    #         pix1=int((lower-CRVAL1)/CD1_1+CRPIX1-1)
+    #     except:
+    #         pix1=0
+    #     try:
+    #         upper = float(w2)
+    #         pix2=int((upper-CRVAL1)/CD1_1+CRPIX1-1)
+    #     except:
+    #         pix2=self.len
+        
+    #     if dim==1:
+    #         newdata = self.data[pix1:pix2]
+    #         newlen = len(newdata)
+    #         newflux = newdata
+    #     elif dim==3:
+    #         newdata = self.data[:,:,pix1:pix2]
+    #         newlen = newdata.shape[2]
+    #         newflux = newdata[0,0,:]
+    #     else:
+    #         print("Warning: format neither onedspec nor multispec (3d)!\n")
+    #     self.newdata = newdata
+    #     newCRVAL1 = self.wave[pix1]
+    #     self.hducopy[0].header['CRVAL1'] = newCRVAL1
+    #     try:
+    #         self.hducopy[0].data = newdata
+    #         self.hducopy.writeto(outputfn,overwrite=True)
+    #     except:
+    #         self.hducopy.writeto(outputfn,overwrite=True)
+    #         print("Warning: format neither onedspec nor multispec (3d)!\n")
+    #     newwave = np.linspace(newCRVAL1, 
+    #                           newCRVAL1 + (newlen - CRPIX1) * CD1_1, 
+    #                           newlen)
+        
+    #     plt.figure(figsize=(8, 6))
+    #     plt.plot(newwave, newflux, lw=1)
+    #     plt.xlabel(r'$\mathrm{Wavelength(\AA})$')
+    #     plt.ylabel(r'$\mathrm{Flux(erg/s/cm^{2}/\AA)}$')
+    #     plt.title('Spectrum of ' + self.name.replace('_', ' '))
+            
+    # def close(self):
+    #     self.hducopy.close()
+    #     self.hdu.close()
 
 
 class DoubleSpec():
@@ -304,141 +690,154 @@ class DoubleSpec():
         self.spr.hdu.close()
 
 
-class SdssSpec():
-    def __init__(self, fname, redshift=None, perform_rest=False):
-        hdu = fits.open(fname)
-        basename = os.path.basename(fname)
-        self.basename = basename
-        hdr = hdu[0].header
-        self.hdr = hdr
-        self.perform_rest = perform_rest
-        self.ra=hdr['plug_ra']          # RA 
-        self.dec=hdr['plug_dec']        # DEC
-        self.plateid = hdr['plateid']   # SDSS plate ID
-        self.mjd = hdr['mjd']           # SDSS MJD
-        self.fiberid = hdr['fiberid']   # SDSS fiber ID
-        if redshift is None:
-            try: 
-                redshift = hdu[2].data['z']
-            except:
-                print('Redshift not provided.')
-                pass
-        self.redshift = redshift
-        data = hdu[1].data
-        hdu.close()
-        wave = 10**data['loglam'] * u.AA 
-        flux = data['flux'] * 10**-17 * u.Unit('erg cm-2 s-1 AA-1') 
-        ivar = pd.Series(data['ivar'])
-        ivar.replace(0, np.nan, inplace=True)
-        ivar_safe = ivar.interpolate()
-        err = 1./np.sqrt(ivar_safe.values) * 10**-17
-        self.wave = wave
-        self.loglam = data['loglam']
-        self.flux = flux
-        self.err = err    
-        self.spec = Spectrum1D(spectral_axis=wave, 
-                               flux=flux, 
-                               uncertainty=StdDevUncertainty(err))
-        if perform_rest == True:
-            self.to_restframe()
-
-
-    def smooth(self, window_length, polyorder, inplace=False, **kwargs):
-        """
-        Smooth the spectrum with scipy.signal.savgol_filter.
-        Parameters:
-        ----------
-            window_length : int
-                The length of the filter window (i.e., the number of coefficients).
-                `window_length` must be a positive odd integer. If `mode` is 'interp',
-                `window_length` must be less than or equal to the size of `x`.
-            polyorder : int
-                The order of the polynomial used to fit the samples.
-                `polyorder` must be less than `window_length`.
-        """
-        flux_sm = savgol_filter(self.flux,
-                                window_length=window_length,
-                                polyorder=polyorder,
-                                **kwargs) 
-        flux_sm = flux_sm * u.Unit('erg cm-2 s-1 AA-1') 
-        self.flux_sm = flux_sm
-        if inplace == True:
-            self.flux_ori = self.flux
-            self.flux = flux_sm
-            self.spec = Spectrum1D(spectral_axis=self.wave, 
-                                   flux=self.flux_sm, 
-                                   uncertainty=StdDevUncertainty(self.err))
-
-    def to_restframe(self):
-        z = self.redshift
-        if hasattr(self, 'spec_z'):
-            warnings.warn('Rest-frame spectrum already exisits. \
-                           Spectrum unchanged.', UserWarning)
-            return
-        if z is not None:
-            self.wave /= (1+z)
-            self.flux *= (1+z)
-            self.err *= (1+z)
-            self.spec_z = self.spec
-            self.spec = Spectrum1D(spectral_axis=self.wave, 
-                                   flux=self.flux, 
-                                   uncertainty=StdDevUncertainty(self.err))
-    
-    def trim_resample(self, wave_range, step, inplace=False):
-        new_disp_grid = np.arange(wave_range[0], wave_range[1], step) * u.AA
-        resampler = SplineInterpolatedResampler()
-        self.trimmed_spec = resampler(self.spec, new_disp_grid) 
-        if inplace == True:
-            self.spec = self.trimmed_spec
-            self._copy_spec_attr()
-
-    def slice(self, idx1, idx2, inplace=False):
-        self.trimmed_spec = self.spec[idx1:idx2]
-        if inplace == True:
-            self.spec = self.trimmed_spec
-            self.loglam = self.loglam[idx1:idx2]
-            self._copy_spec_attr()
+# class SdssSpec(SpecBase):
+#     def __init__(self, fname, redshift=None, perform_rest=False):
+#         hdu = fits.open(fname)
+#         basename = os.path.basename(fname)
+#         self.basename = basename
+#         hdr = hdu[0].header
+#         self.hdr = hdr
+#         self.perform_rest = perform_rest
+#         self.ra=hdr['plug_ra']          # RA 
+#         self.dec=hdr['plug_dec']        # DEC
+#         self.plateid = hdr['plateid']   # SDSS plate ID
+#         self.mjd = hdr['mjd']           # SDSS MJD
+#         self.fiberid = hdr['fiberid']   # SDSS fiber ID
+#         if redshift is None:
+#             try: 
+#                 redshift = hdu[2].data['z']
+#             except:
+#                 print('Redshift not provided.')
+#                 pass
+#         self.redshift = redshift
+#         data = hdu[1].data
+#         hdu.close()
+#         wave = 10**data['loglam'] * u.AA 
+#         flux = data['flux'] * 10**-17 * u.Unit('erg cm-2 s-1 AA-1') 
+#         ivar = pd.Series(data['ivar'])
+#         ivar.replace(0, np.nan, inplace=True)
+#         ivar_safe = ivar.interpolate()
+#         err = 1./np.sqrt(ivar_safe.values) * 10**-17
+#         self.wave = wave
+#         self.loglam = data['loglam']
+#         self.flux = flux
+#         self.err = err    
+#         self.spec = Spectrum1D(spectral_axis=wave, 
+#                                flux=flux, 
+#                                uncertainty=StdDevUncertainty(err))
+#         if perform_rest == True:
+#             self.to_restframe()
         
-    def plot(self, fig_num=0):
-        plt.figure(num=fig_num, figsize=(16, 6))
-        plt.plot(self.spec.spectral_axis, self.spec.flux, lw=1, c='k')
-        # plt.plot(self.spec.spectral_axis, self.err)
-        plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
-        plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
-        plt.title(self.basename)
-#         plt.show()
+#     def plot_6sigma(self):
+#         plt.figure()
+#         mean = np.nanmean(self.spec.flux.value)
+#         std = np.nanstd(self.spec.flux.value)
+#         above_idx = np.where(abs(self.spec.flux.value)-6*std>0)
+#         below_idx = np.where(abs(self.spec.flux.value)-6*std<0)
+#         plt.step(self.spec.spectral_axis[below_idx], self.spec.flux[below_idx])
+#         plt.step(self.spec.spectral_axis[above_idx], self.spec.flux[above_idx])
+# #         plt.plot(self.spec.spectral_axis, self.spec.flux)
+#         plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
+#         plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
+#         plt.title(self.basename)
         
-    def _copy_spec_attr(self):
-        self.wave = self.spec.spectral_axis
-        self.flux = self.spec.flux
-        self.err = self.spec.uncertainty.array
-        
-    def plot_6sigma(self):
-        plt.figure()
-        mean = np.nanmean(self.spec.flux.value)
-        std = np.nanstd(self.spec.flux.value)
-        above_idx = np.where(abs(self.spec.flux.value)-6*std>0)
-        below_idx = np.where(abs(self.spec.flux.value)-6*std<0)
-        plt.step(self.spec.spectral_axis[below_idx], self.spec.flux[below_idx])
-        plt.step(self.spec.spectral_axis[above_idx], self.spec.flux[above_idx])
-#         plt.plot(self.spec.spectral_axis, self.spec.flux)
-        plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
-        plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
-        plt.title(self.basename)
-        
-    def plot_err_sigma(self):
-        plt.figure()
-        med = np.nanmedian(self.err)
-        std = np.nanstd(self.err)
-        above_idx = np.where(abs(self.err)-6*std>0)
-        below_idx = np.where(abs(self.err)-6*std<0)
-        plt.step(self.spec.spectral_axis[below_idx], self.spec.flux[below_idx])
-        plt.step(self.spec.spectral_axis[above_idx], self.spec.flux[above_idx])
-#         plt.plot(self.spec.spectral_axis, self.spec.flux)
-        plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
-        plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
-        plt.title(self.basename)
+#     def plot_err_sigma(self):
+#         plt.figure()
+#         med = np.nanmedian(self.err)
+#         std = np.nanstd(self.err)
+#         above_idx = np.where(abs(self.err)-6*std>0)
+#         below_idx = np.where(abs(self.err)-6*std<0)
+#         plt.step(self.spec.spectral_axis[below_idx], self.spec.flux[below_idx])
+#         plt.step(self.spec.spectral_axis[above_idx], self.spec.flux[above_idx])
+# #         plt.plot(self.spec.spectral_axis, self.spec.flux)
+#         plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
+#         plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
+#         plt.title(self.basename)
 
+# class LowResSpec(SpecBase):
+#     """A class for LAMOST Low Resolution Spectral (LRS) data.
+#     """
+#     def __init__(self, wave, flux, err, z=None, ra=None, dec=None, plateid=None, 
+#                  mjd=None, fiberid=None, and_mask=None, or_mask=None):
+#         """Initialize the LowResSpec object.
+
+#         Parameters
+#         ----------
+#         wave : 1-D np.array
+#             Wavelength axis of the spectrum
+#         flux : 1-D np.array
+#             (Relative) flux density of the spectrum
+#         err : 1-D np.array
+#             (Relative) flux error (one sigma) of the spectrum
+#         z : float, optional
+#             Redshift, by default None
+#         ra : float, optional
+#             Right ascension of the object, by default None
+#         dec : float, optional
+#             Declination of the object, by default None
+#         plateid : int, optional
+#             LAMOST plateid of the object, by default None
+#         mjd : int, optional
+#             MJD of the observation, by default None
+#         fiberid : int, optional
+#             LAMOST fiberid of the object, by default None
+#         and_mask : 1-D np.array, optional
+#             And mask of the flux, by default None
+#         or_mask : 1-D np.array, optional
+#             Or mask of the flux, by default None
+#         """
+#         self.wave = np.asarray(wave, dtype=np.float64)
+#         self.flux = np.asarray(flux, dtype=np.float64)
+#         self.err = np.asarray(err, dtype=np.float64)
+#         self.sn_obs = self.flux/self.err
+#         self.z = z
+#         self.and_mask = and_mask
+#         self.or_mask = or_mask
+#         self.ra = ra
+#         self.dec = dec
+#         # self.name = name
+#         self.plateid = plateid
+#         self.mjd = mjd
+#         self.fiberid = fiberid
+
+
+#     @classmethod
+#     def load(cls, fname):
+#         """Load the low resolution spectrum from fits file.
+
+#         Parameters
+#         ----------
+#         fname : str
+#             Name (path) of the fits file
+
+#         Returns
+#         -------
+#         object
+#             An instance of LowResSpec class.
+#         """
+#         hdu = fits.open(fname)
+#         header = hdu[0].header
+#         ra=header['RA']
+#         dec=header['DEC']
+#         plateid = header['OBSID']
+#         mjd = header['MJD'] 
+#         fiberid = header['FIBERID']
+#         objid = header['OBJNAME']
+#         objname = header['DESIG']
+#         data = hdu[0].data
+#         flux = data[0]
+#         ivar = data[1]
+#         wave = data[2]
+#         and_mask = data[3]
+#         or_mask = data[4] 
+#         z_pipe = header['z']
+#         ivar = pd.Series(data[1])
+#         ivar.replace(0, np.nan, inplace=True)
+#         ivar_safe = ivar.interpolate()
+#         err = 1./np.sqrt(ivar_safe.values) 
+#         hdu.close()  
+#         return cls(wave=wave, flux=flux, err=err, z=z_pipe, ra=ra, dec=dec, plateid=plateid, 
+#                    mjd=mjd, fiberid=fiberid, and_mask=and_mask, or_mask=or_mask)
 
 class NIRSpecS3d():
     
