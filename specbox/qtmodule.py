@@ -40,4 +40,5 @@ class SpecPlotWindow(QMainWindow):
         if event.key() == 'm':
             self.xdata = self.specplot.axes.lines[0].get_xdata()
             self.ydata = self.specplot.axes.lines[0].get_ydata()
+            print(self.xdata, self.ydata)
         

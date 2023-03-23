@@ -17,13 +17,28 @@ from specutils import Spectrum1D,SpectrumCollection,SpectrumList
 from specutils.manipulation import FluxConservingResampler, LinearInterpolatedResampler, SplineInterpolatedResampler, median_smooth
 from .auxmodule import *
 import warnings
-# import asdf
 from astropy.units import Quantity
-# from gwcs.wcstools import grid_from_bounding_box
+
 
 class ConvenientSpecMixin():
+    """A mixin class for convenient spectrum operations.
+    """
     def __init__(self, wave=None, flux=None, err=None, 
                  wave_unit=None, flux_unit=None, *args, **kwargs):
+        """
+        Parameters
+        ----------
+        wave : array-like
+            Wavelength array.   
+        flux : array-like   
+            Flux array.
+        err : array-like
+            Error array.
+        wave_unit : astropy.units.Unit      
+            Wavelength unit.
+        flux_unit : astropy.units.Unit
+            Flux unit.
+        """
         super().__init__(*args, **kwargs)
         if wave_unit is not None:
             self.wave_unit = wave_unit
@@ -153,30 +168,44 @@ class ConvenientSpecMixin():
                 The order of the polynomial used to fit the samples.
                 `polyorder` must be less than `window_length`.
         """
+        if hasattr(self, 'flux_ori'):
+            warnings.warn('The original spectrum is already replaced by the smoothed one. \
+                           Smoothing not performed.', UserWarning)
+            print('The original spectrum is already replaced by the smoothed one. \nSmoothing not performed.')
+            return
         flux_sm = savgol_filter(self.flux.value,
                                 window_length=window_length,
                                 polyorder=polyorder,
                                 **kwargs) 
         flux_sm = flux_sm * self.flux.unit
         self.flux_sm = flux_sm
+        if plot == True:
+            ax = self.plot(label='original')
+            ax.plot(self.wave, self.flux_sm, lw=1, c='r', label='smoothed')
+            ax.legend()
         if inplace == True:
             self.flux_ori = self.flux
             self.flux = flux_sm
             self.spec = Spectrum1D(spectral_axis=self.wave, 
                                    flux=self.flux_sm, 
                                    uncertainty=StdDevUncertainty(self.err)) 
-        if plot == True:
-            plt.figure(num=0, figsize=(16, 6))
-            plt.plot(self.spec.spectral_axis, self.flux_sm.data, lw=1, c='k')
-            # plt.plot(self.spec.spectral_axis, self.err)
-            plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
-            plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
         return self
     
     def plot(self, ax=None, **kwargs):
+        """
+        Plot the spectrum.
+        Parameters:
+        ----------
+            ax : matplotlib.axes.Axes
+                The axes to plot on. If None, a new set of axes is created.
+        Returns:
+        -------
+            ax : matplotlib.axes.Axes
+                The axes that were plotted on.
+        """
         if ax is None:
             fig, ax = plt.subplots()
-        ax.plot(self.wave, self.flux, **kwargs)
+        ax.plot(self.wave, self.flux, lw=1, c='k', **kwargs)
         ax.set_xlabel("Wavelength ({})".format(self.wave.unit))
         ax.set_ylabel("Flux ({})".format(self.flux.unit))
         return ax
@@ -184,26 +213,58 @@ class ConvenientSpecMixin():
     def copy(self):
         return self.__class__(self.wave, self.flux, self.err)
     
+    def to_restframe(self, z, inplace=False):
+        """
+        Convert the spectrum to the rest-frame.
+        Parameters:
+        ----------
+            z : float
+                Redshift of the spectrum.
+            inplace : bool  
+                If True, the spectrum is converted to the rest-frame in place.
+                If False, only a new Spectrum1D object is created.
+        """
+        z = self.redshift
+        if hasattr(self, 'spec_rest'):
+            warnings.warn('Rest-frame spectrum already exisits. \
+                           Spectrum unchanged.', UserWarning)
+            return
+        if z is not None:
+            self.wave /= (1+z)
+            self.flux *= (1+z)
+            self.err *= (1+z)
+            self.spec_rest = Spectrum1D(spectral_axis=self.wave, 
+                                        flux=self.flux, 
+                                        uncertainty=StdDevUncertainty(self.err))
+            if inplace == True:
+                self.spec = self.spec_rest
+    
+
 class SpecIOMixin():
+    """
+    Mixin class for reading and writing spectra.
+    """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._filename = None
-        self._basename = None
-        self._objname = None
-        self._ra = None
-        self._dec = None
-        self._redshift = None
-        self._plateid = None
-        self._mjd = None
-        self._fiberid = None
-        self._and_mask = None
-        self._or_mask = None
+        # self._filename = None
+        # self._basename = None
+        # self._objname = None
+        # self._ra = None
+        # self._dec = None
+        # self._redshift = None
+        # self._plateid = None
+        # self._mjd = None
+        # self._fiberid = None
+        # self._and_mask = None
+        # self._or_mask = None
 
     def read(self, filename, **kwargs):
+        self.filename = filename
         self.basename = os.path.basename(filename)
         hdu = fits.open(filename)
         self.hdr = hdu[0].header
         self.data = hdu[0].data
+        self.hdu = hdu
 
     def write(self, filename, **kwargs):
         hdu = fits.PrimaryHDU(self.data, header=self.hdr)
@@ -211,47 +272,76 @@ class SpecIOMixin():
 
 
 class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
-    def __init__(self, *args, **kwargs):
+    """
+    Class for SDSS spectra.
+    Parameters:
+    ----------
+        filename : str
+            Name of the SDSS spectrum file.
+    """
+    def __init__(self, filename=None, *args, **kwargs):
+        """
+        Initialize the SpecSDSS class.
+        Parameters:
+        ----------
+            filename : str
+                Name of the SDSS spectrum file.
+        """
         super().__init__(*args, **kwargs)
-        self._filename = None
-        self._basename = None
-        self._objname = None
-        self._ra = None
-        self._dec = None
-        self._redshift = None
-        self._plateid = None
-        self._mjd = None
-        self._fiberid = None
-        self._and_mask = None
-        self._or_mask = None
+        self.wave_unit = u.Angstrom
+        self.flux_unit = 1e-17 * u.erg / u.s / u.cm**2 / u.Angstrom
+        if filename is not None:
+            self.read(filename, **kwargs)
 
     def read(self, filename, **kwargs):
+        """
+        Read the SDSS spectrum file.
+        Parameters:
+        ----------
+            filename : str
+                Name of the SDSS spectrum file.
+        """
         super().read(filename, **kwargs)
-        self.basename = os.path.basename(filename)
-        self.wave = 10**self.data['loglam']
-        self.flux = self.data['flux']
-        self.err = self.data['ivar']**-0.5
-        self.redshift = self.hdr['Z']
-        self.ra = self.hdr['RA']
-        self.dec = self.hdr['DEC']
-        self.objname = self.hdr['OBJNAME']
-        self.plateid = self.hdr['PLATEID']
-        self.mjd = self.hdr['MJD']
-        self.fiberid = self.hdr['FIBERID']
-        self.and_mask = self.hdr['AND_MASK']
-        self.or_mask = self.hdr['OR_MASK']
+        header = self.hdr
+        data = self.data
+        self.loglam = data['loglam']
+        self.wave = 10**data['loglam'] * self.wave_unit
+        self.flux = data['flux'] * self.flux_unit
+        self.err = data['ivar']**-0.5
+        try:
+            self.ra = header['plug_ra']          # RA 
+            self.dec = header['plug_dec']        # DEC
+        except:
+            self.ra = header['ra']          # RA
+            self.dec = header['dec']        # DEC
+        self.plateid = header['PLATEID']
+        self.mjd = header['MJD']
+        self.fiberid = header['FIBERID']
+        self.and_mask = header['AND_MASK']
+        self.or_mask = header['OR_MASK']
+        redshift = kwargs.get('redshift', None)
+        if redshift is None:
+            try: 
+                redshift = self.hdu[2].data['Z']
+            except:
+                redshift = header['Z']
+            finally:
+                redshift = None
+        self.redshift = redshift
+        # self.objname = self.hdr['OBJNAME']
         self.spec = Spectrum1D(spectral_axis=self.wave, flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
         self.filename = filename
 
     def write(self, filename, **kwargs):
-        self.data = Table([self.wave, self.flux, self.err], 
+        self.loglam = np.log10(self.wave.value)
+        self.data = Table([self.loglam, self.flux, self.err], 
                           names=['loglam', 'flux', 'ivar'])
         self.hdr = fits.Header()
         self.hdr['Z'] = self.redshift
         self.hdr['RA'] = self.ra
         self.hdr['DEC'] = self.dec
-        self.hdr['OBJNAME'] = self.objname
+        # self.hdr['OBJNAME'] = self.objname
         self.hdr['PLATEID'] = self.plateid
         self.hdr['MJD'] = self.mjd
         self.hdr['FIBERID'] = self.fiberid
@@ -260,7 +350,16 @@ class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
         super().write(filename, **kwargs)
 
 class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
-    def __init__(self, *args, **kwargs):
+    """
+    Class for reading IRAF spectra.
+    """
+    def __init__(self, filename=None, *args, **kwargs):
+        """
+        Parameters:
+        ----------
+            filename : str
+                Name of the file to read.    
+        """
         super().__init__(*args, **kwargs)
         self.wave_unit=u.AA
         self.flux_unit=u.erg/u.s/u.cm**2/u.AA
@@ -269,8 +368,25 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
         self.err = None
         self.telescope = kwargs.get('telescope', None)
         self.side = kwargs.get('side', None)
+        if filename is not None:
+            self.read(filename, **kwargs)
 
     def read(self, filename, **kwargs):
+        """
+        Read the spectrum.
+        Parameters:
+        ----------
+            filename : str
+                Name of the file to read.
+            ra : float
+                Right ascension of the object in degrees.
+            dec : float
+                Declination of the object in degrees.
+            telescope : str
+                Name of the telescope. Default is None.
+            side : str
+                Side (arm) of the spectrograph (e.g. blue, red). Default is None.
+         """
         super().read(filename, **kwargs)
         header = self.hdr
         data = self.data
@@ -289,6 +405,8 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
                                  unit=(u.hourangle, u.deg))
                 ra = coord.ra.value
                 dec = coord.dec.value
+        self.ra = ra
+        self.dec = dec
         if 'J' in objname:
             try:
                 name = designation(ra, dec, telescope)
@@ -309,8 +427,6 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
         self.CD1_1 = CD1_1
         self.CRPIX1 = CRPIX1
         W1 = (1-CRPIX1) * CD1_1 + CRVAL1
-        # data = hdu[0].data
-        # self.data = data
         dim = len(data.shape)
         self.dim = dim
         if dim==1:
@@ -334,56 +450,8 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
         self.spec = Spectrum1D(spectral_axis=self.wave, 
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
-        # return self
 
 
-
-#     def smooth(self, window_length, polyorder, plot=True, inplace=False, **kwargs):
-#         """
-#         Smooth the spectrum with scipy.signal.savgol_filter.
-#         Parameters:
-#         ----------
-#             window_length : int
-#                 The length of the filter window (i.e., the number of coefficients).
-#                 `window_length` must be a positive odd integer. If `mode` is 'interp',
-#                 `window_length` must be less than or equal to the size of `x`.
-#             polyorder : int
-#                 The order of the polynomial used to fit the samples.
-#                 `polyorder` must be less than `window_length`.
-#         """
-#         flux_sm = savgol_filter(self.flux,
-#                                 window_length=window_length,
-#                                 polyorder=polyorder,
-#                                 **kwargs) 
-#         flux_sm = flux_sm * u.Unit('erg cm-2 s-1 AA-1') 
-#         self.flux_sm = flux_sm
-#         if inplace == True:
-#             self.flux_ori = self.flux
-#             self.flux = flux_sm
-#             self.spec = Spectrum1D(spectral_axis=self.wave, 
-#                                    flux=self.flux_sm, 
-#                                    uncertainty=StdDevUncertainty(self.err)) 
-#         if plot == True:
-#             plt.figure(num=0, figsize=(16, 6))
-#             plt.plot(self.spec.spectral_axis, self.flux_sm.data, lw=1, c='k')
-#             # plt.plot(self.spec.spectral_axis, self.err)
-#             plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
-#             plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
-            
-#     def to_restframe(self):
-#         z = self.redshift
-#         if hasattr(self, 'spec_z'):
-#             warnings.warn('Rest-frame spectrum already exisits. \
-#                            Spectrum unchanged.', UserWarning)
-#             return
-#         if z is not None:
-#             self.wave /= (1+z)
-#             self.flux *= (1+z)
-#             self.err *= (1+z)
-#             self.spec_z = self.spec
-#             self.spec = Spectrum1D(spectral_axis=self.wave, 
-#                                    flux=self.flux, 
-#                                    uncertainty=StdDevUncertainty(self.err))
     
 #     def trim_resample(self, wave_range, step, inplace=False):
 #         new_disp_grid = np.arange(wave_range[0], wave_range[1], step) * u.AA
@@ -417,6 +485,67 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
 #         self.flux = self.spec.flux
 #         self.err = self.spec.uncertainty.array
 
+class SpecLAMOST(ConvenientSpecMixin, SpecIOMixin):
+    """A class for LAMOST Low Resolution Spectral (LRS) data.
+    """
+    def __init__(self, filename=None, flux_calibrated=False, *args, **kwargs):
+        """
+        Parameters:
+        ----------
+        filename : str
+            Name of the file to read.
+        flux_calibrated : bool
+            Whether the flux has been calibrated to absolute flux units.
+            If True, the flux is in units of 1e-17 erg/s/cm^2/Angstrom.
+            If False, the flux is in dimensionless units. Default is False.
+        """
+        super().__init__(*args, **kwargs)
+        self.wave_unit=u.AA
+        if flux_calibrated:
+            self.flux_unit=1e-17 * u.erg/u.s/u.cm**2/u.AA 
+        self.flux_unit=u.dimensionless_unscaled
+        self.wave = None
+        self.flux = None
+        self.err = None
+        if filename is not None:
+            self.read(filename, **kwargs)
+
+    def read(self, filename, **kwargs):
+        """
+        Read the data from a LAMOST LRS file.
+        Parameters:
+        ----------
+        filename : str
+            Name of the file to read.
+        """
+        super().read(filename, **kwargs)
+        header = self.hdr
+        data = self.data
+        self.ra=header['RA']
+        self.dec=header['DEC']
+        self.plateid = header['OBSID']
+        self.mjd = header['MJD'] 
+        self.fiberid = header['FIBERID']
+        self.objid = header['OBJNAME']
+        self.objname = header['DESIG']
+        flux = data[0]
+        ivar = data[1]
+        wave = data[2]
+        self.loglam = np.log10(wave)
+        self.and_mask = data[3]
+        self.or_mask = data[4] 
+        z_pipe = header['z']
+        self.redshift = z_pipe
+        ivar = pd.Series(data[1])
+        ivar.replace(0, np.nan, inplace=True)
+        ivar_safe = ivar.interpolate()
+        err = 1./np.sqrt(ivar_safe.values) 
+        self.wave = wave * self.wave_unit
+        self.flux = flux * self.flux_unit
+        self.err = err
+        self.spec = Spectrum1D(spectral_axis=self.wave, 
+                               flux=self.flux, 
+                               uncertainty=StdDevUncertainty(self.err))
 
 # class Spiraf(SpecBase):
 #     def __init__(self, fname, redshift=None, ra=None, dec=None, 
@@ -570,17 +699,17 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
 class DoubleSpec():
     def __init__(self, spb=None, spr=None, spbfile=None, sprfile=None, varb=None, varr=None, instr=None):
         if spb is None:
-            spb = Spiraf(spbfile)
+            spb = SpecIRAF(spbfile)
         if spr is None:
-            spr = Spiraf(sprfile)
+            spr = SpecIRAF(sprfile)
         self.spb = spb
         self.spr = spr
         self.spbfile = spbfile
         self.sprfile = sprfile
         if varb is not None:
-            self.varb = Spiraf(varb)
+            self.varb = SpecIRAF(varb)
         if varr is not None:
-            self.varr = Spiraf(varr)
+            self.varr = SpecIRAF(varr)
 #         self.objname = os.path.basename(spb.fname)[0:10]
 #         self.objname = os.path.basename(spb.fname)
         self.objname = fits.getheader(spbfile)['object']
