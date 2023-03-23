@@ -147,8 +147,8 @@ class ConvenientSpecMixin():
         return self
     
     def flux_conserve_resample(self, wave, inplace=False):
-        if not inplace:
-            return self.copy().flux_conserve_resample(wave, inplace=True)
+        # if not inplace:
+        #     return self.copy().flux_conserve_resample(wave, inplace=True)
         resampler = FluxConservingResampler()
         self.spec = resampler(self.spec, wave)
         self.wave = self.spec.spectral_axis
@@ -502,8 +502,9 @@ class SpecLAMOST(ConvenientSpecMixin, SpecIOMixin):
         super().__init__(*args, **kwargs)
         self.wave_unit=u.AA
         if flux_calibrated:
-            self.flux_unit=1e-17 * u.erg/u.s/u.cm**2/u.AA 
-        self.flux_unit=u.dimensionless_unscaled
+            self.flux_unit = 1e-17 * u.erg/u.s/u.cm**2/u.AA 
+        else:
+            self.flux_unit = u.dimensionless_unscaled
         self.wave = None
         self.flux = None
         self.err = None
