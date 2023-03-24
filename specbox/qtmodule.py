@@ -7,10 +7,20 @@ import pyqtgraph as pg
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+import matplotlib.pyplot as plt
+import numpy as np
+from astropy.table import Table
+from astropy.io import fits
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+import pandas as pd
+
 
 def iter_by_step(speclist, step=1):
     for i in range(0, len(speclist), step):
         yield speclist[i]
+
+my_dict = {}
 
 class PGSpecPlot(pg.PlotWidget):
     """
@@ -29,8 +39,8 @@ class PGSpecPlot(pg.PlotWidget):
         self.setAspectLocked(False)
         self.vb = self.getViewBox()
         self.iter = None
+        self.counter = 0
         self.go_iter()
-        self.show()
 
     def go_iter(self):
         self.iter = iter_by_step(self.speclist)
@@ -39,10 +49,7 @@ class PGSpecPlot(pg.PlotWidget):
     def plot_processed(self):
         try:
             specfile = next(self.iter)
-        except StopIteration:
-            self.iter = None
-            pass
-        else:
+            self.counter += 1
             spec = self.SpecClass(specfile)
             self.spec = spec
             z_pipe = spec.redshift
@@ -50,21 +57,20 @@ class PGSpecPlot(pg.PlotWidget):
             self.plot(spec.wave.value, spec.flux.value, pen='b', 
                       symbol='o', symbolSize=4, symbolPen=None, connect='finite',
                       symbolBrush='k', antialias=True)
-            self.text = pg.TextItem(text="Object: {0} \t Z_pipe: {1:.2f}".format(objname, z_pipe), anchor=(0,0), color='r', border='w', fill=(255, 255, 255, 255))
-            # Set the text position to the top left corner of the plot
-            self.text.setPos(spec.wave.value[0]*1.4, spec.flux.value.max()*0.8)
-            self.text.setFont(QFont("Arial", 20, QFont.Bold))
-            self.addItem(self.text)
             self.setLabel('left', "Flux", units=spec.flux.unit.to_string())
             self.setLabel('bottom', "Wavelength", units=spec.wave.unit.to_string())
+        except StopIteration:
+            self.iter = None
+            self.close()
 
     def keyPressEvent(self, event):
+        spec = self.spec
         if event.key() == Qt.Key_Q:
-            if self.iter is not None and self.iter is not iter_by_step(self.speclist):
+            if spec.objid not in my_dict:
+                my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'QSO(Default)']
+            if self.iter is not None and self.counter < len(self.speclist):
                 self.clear()
                 self.plot_processed()
-            else:
-                self.close()
         if event.key() == Qt.Key_M:
             mouse_pos = self.mapFromGlobal(QCursor.pos())
             self.vb = self.getViewBox()
@@ -84,7 +90,19 @@ class PGSpecPlot(pg.PlotWidget):
             print("Wavelength: {0:.2f} Flux: {1:.2f}".format(wave, flux))
         if event.key() == Qt.Key_S:
             print("Class: STAR.")
-
+            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'STAR']
+        if event.key() == Qt.Key_G:
+            print("Class: GALAXY.")
+            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'GALAXY']
+        if event.key() == Qt.Key_A:
+            print("Class: QSO(AGN).")
+            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'QSO']
+        if event.key() == Qt.Key_U:
+            print("Class: UNKNOWN.")
+            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'UNKNOWN']
+        if event.key() == Qt.Key_L:
+            print("Class: LIKELY/Unusual QSO.")
+            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'LIKELY']
 
 class PGSpecPlotApp(QApplication):
     def __init__(self, speclist, SpecClass=SpecLAMOST):
@@ -92,10 +110,70 @@ class PGSpecPlotApp(QApplication):
         self.speclist = speclist
         self.SpecClass = SpecClass
         self.plot = PGSpecPlot(self.speclist, self.SpecClass)
-        self.plot.show()
+        self.make_layout()
+        # self.layout.show()
         self.exec_()
+        self.my_dict = my_dict
+        self.save_dict_todf()
         self.exit() 
         sys.exit()    
+    
+    def make_layout(self):
+        layout = pg.LayoutWidget()
+        layout.resize(1200, 800)
+        if self.plot.iter is not None and self.plot.counter < len(self.speclist):
+            toplabel = layout.addLabel("Press 'Q' for next image, \t press no key or 'A' to set class as QSO(AGN), \n\
+'S' to set class as STAR, \t 'G' to set class as GALAXY, \n'U' to set class as UNKNOWN, \t 'L' to set class as LIKELY/Unusual QSO, \n\
+'M' to get mouse position, \t 'Space' to get spectrum value at current wavelength.", row=0, col=0, colspan=2)
+            toplabel.setFont(QFont("Arial", 16))
+            toplabel.setFixedHeight(100)
+            toplabel.setAlignment(Qt.AlignLeft)
+            toplabel.setStyleSheet("background-color: white")
+            toplabel.setFrameStyle(QFrame.Panel | QFrame.Raised)
+            toplabel.setLineWidth(2)
+            toplabel.setMidLineWidth(2)
+            toplabel.setFrameShadow(QFrame.Sunken)
+            toplabel.setMargin(5)
+            toplabel.setIndent(5)
+            toplabel.setWordWrap(True)
+            secondlabel = layout.addLabel("Object: {0} \t Z_pipe = {1:.2f}".format(self.plot.spec.objname, 
+                                                                                  self.plot.spec.redshift), 
+                                                                                  row=1, col=0, colspan=2)
+            secondlabel.setFont(QFont("Arial", 18, QFont.Bold))
+            secondlabel.setFixedHeight(50)
+            secondlabel.setAlignment(Qt.AlignCenter)
+            secondlabel.setStyleSheet("background-color: white")
+            secondlabel.setFrameStyle(QFrame.Panel | QFrame.Raised)
+            secondlabel.setLineWidth(2)
+            secondlabel.setMidLineWidth(2)
+            secondlabel.setFrameShadow(QFrame.Sunken)
+            secondlabel.setMargin(10)
+            secondlabel.setIndent(10)
+            secondlabel.setWordWrap(True)
+            layout.addWidget(self.plot, row=2, col=0, colspan=2) 
+            self.layout = layout
+            self.layout.show()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Q:
+            if self.plot.iter is not None and self.plot.counter < len(self.speclist):
+                self.plot.keyPressEvent(event)
+            else:
+                self.plot.close()
+                self.layout.close()
+                self.exit()
+                sys.exit()
+        else:
+            self.plot.keyPressEvent(event)
+    
+    def save_dict_todf(self):
+        if self.my_dict:
+            df = pd.DataFrame.from_dict(self.my_dict, orient='index')
+            df.rename(columns={0:'objname', 1:'ra', 2:'dec', 3:'vi_class'}, inplace=True)
+            df['objid'] = df.index.values
+            df.set_index(np.arange(len(df)), inplace=True)
+            df.to_csv('vi_nonqso.csv', index=False)
+
 
 class PGSpecPlotThread(QThread):
     def __init__(self, speclist, SpecClass=SpecLAMOST):
@@ -140,3 +218,5 @@ class MatSpecPlot(FigureCanvas):
     def close(self):
         self.close()
         self.quit()
+
+
