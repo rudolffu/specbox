@@ -51,12 +51,17 @@ class PGSpecPlot(pg.PlotWidget):
             specfile = next(self.iter)
             self.counter += 1
             spec = self.SpecClass(specfile)
+            spec.smooth(5, 3, inplace=True, plot=False)
             self.spec = spec
             z_pipe = spec.redshift
             objname = spec.objname
             self.plot(spec.wave.value, spec.flux.value, pen='b', 
                       symbol='o', symbolSize=4, symbolPen=None, connect='finite',
                       symbolBrush='k', antialias=True)
+            # Label the objname and redshift on the top center of the plot
+            self.text = pg.TextItem(text="Objname: {0} \t Z_pipe = {1:.2f}".format(objname, z_pipe), anchor=(0,0), color='r', border='w', fill=(255, 255, 255, 200))
+            self.text.setPos(spec.wave.value[0] * 1.3, spec.flux.value.max() * 0.9)
+            self.addItem(self.text)
             self.setLabel('left', "Flux", units=spec.flux.unit.to_string())
             self.setLabel('bottom', "Wavelength", units=spec.wave.unit.to_string())
         except StopIteration:
@@ -112,6 +117,8 @@ class PGSpecPlotApp(QApplication):
         self.plot = PGSpecPlot(self.speclist, self.SpecClass)
         self.make_layout()
         # self.layout.show()
+        self.my_dict = my_dict
+        self.save_dict_todf()
         self.exec_()
         self.my_dict = my_dict
         self.save_dict_todf()
@@ -136,21 +143,21 @@ class PGSpecPlotApp(QApplication):
             toplabel.setMargin(5)
             toplabel.setIndent(5)
             toplabel.setWordWrap(True)
-            secondlabel = layout.addLabel("Object: {0} \t Z_pipe = {1:.2f}".format(self.plot.spec.objname, 
-                                                                                  self.plot.spec.redshift), 
-                                                                                  row=1, col=0, colspan=2)
-            secondlabel.setFont(QFont("Arial", 18, QFont.Bold))
-            secondlabel.setFixedHeight(50)
-            secondlabel.setAlignment(Qt.AlignCenter)
-            secondlabel.setStyleSheet("background-color: white")
-            secondlabel.setFrameStyle(QFrame.Panel | QFrame.Raised)
-            secondlabel.setLineWidth(2)
-            secondlabel.setMidLineWidth(2)
-            secondlabel.setFrameShadow(QFrame.Sunken)
-            secondlabel.setMargin(10)
-            secondlabel.setIndent(10)
-            secondlabel.setWordWrap(True)
-            layout.addWidget(self.plot, row=2, col=0, colspan=2) 
+            # secondlabel = layout.addLabel("Object: {0} \t Z_pipe = {1:.2f}".format(self.plot.spec.objname, 
+            #                                                                       self.plot.spec.redshift), 
+            #                                                                       row=1, col=0, colspan=2)
+            # secondlabel.setFont(QFont("Arial", 18, QFont.Bold))
+            # secondlabel.setFixedHeight(50)
+            # secondlabel.setAlignment(Qt.AlignCenter)
+            # secondlabel.setStyleSheet("background-color: white")
+            # secondlabel.setFrameStyle(QFrame.Panel | QFrame.Raised)
+            # secondlabel.setLineWidth(2)
+            # secondlabel.setMidLineWidth(2)
+            # secondlabel.setFrameShadow(QFrame.Sunken)
+            # secondlabel.setMargin(10)
+            # secondlabel.setIndent(10)
+            # secondlabel.setWordWrap(True)
+            layout.addWidget(self.plot, row=1, col=0, colspan=2) 
             self.layout = layout
             self.layout.show()
 
@@ -167,12 +174,20 @@ class PGSpecPlotApp(QApplication):
             self.plot.keyPressEvent(event)
     
     def save_dict_todf(self):
-        if self.my_dict:
+        self.my_dict = my_dict
+        if self.plot.counter % 50 == 0:
+            print("Saving temp file to csv...")
             df = pd.DataFrame.from_dict(self.my_dict, orient='index')
             df.rename(columns={0:'objname', 1:'ra', 2:'dec', 3:'vi_class'}, inplace=True)
             df['objid'] = df.index.values
             df.set_index(np.arange(len(df)), inplace=True)
-            df.to_csv('vi_nonqso.csv', index=False)
+            df.to_csv('vi_nonqso_temp.csv', index=False)
+        # if self.my_dict:
+        df = pd.DataFrame.from_dict(self.my_dict, orient='index')
+        df.rename(columns={0:'objname', 1:'ra', 2:'dec', 3:'vi_class'}, inplace=True)
+        df['objid'] = df.index.values
+        df.set_index(np.arange(len(df)), inplace=True)
+        df.to_csv('vi_nonqso.csv', index=False)
 
 
 class PGSpecPlotThread(QThread):
