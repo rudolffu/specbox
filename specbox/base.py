@@ -246,17 +246,6 @@ class SpecIOMixin():
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # self._filename = None
-        # self._basename = None
-        # self._objname = None
-        # self._ra = None
-        # self._dec = None
-        # self._redshift = None
-        # self._plateid = None
-        # self._mjd = None
-        # self._fiberid = None
-        # self._and_mask = None
-        # self._or_mask = None
 
     def read(self, filename, **kwargs):
         self.filename = filename
@@ -307,7 +296,7 @@ class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
         self.loglam = data['loglam']
         self.wave = 10**data['loglam'] * self.wave_unit
         self.flux = data['flux'] * self.flux_unit
-        self.err = data['ivar']**-0.5
+        self.err = data['ivar']**-0.5 * 1e-17
         try:
             self.ra = header['plug_ra']          # RA 
             self.dec = header['plug_dec']        # DEC
@@ -501,6 +490,7 @@ class SpecLAMOST(ConvenientSpecMixin, SpecIOMixin):
         """
         super().__init__(*args, **kwargs)
         self.wave_unit=u.AA
+        self.flux_calibrated = flux_calibrated
         if flux_calibrated:
             self.flux_unit = 1e-17 * u.erg/u.s/u.cm**2/u.AA 
         else:
@@ -521,7 +511,12 @@ class SpecLAMOST(ConvenientSpecMixin, SpecIOMixin):
         """
         super().read(filename, **kwargs)
         header = self.hdr
-        data = self.data
+        hdu = self.hdu
+        if hdu[0].data:
+            data = hdu[0].data
+        else:
+            data = hdu[1].data
+        self.data = data
         self.ra=header['RA']
         self.dec=header['DEC']
         self.plateid = header['OBSID']
@@ -529,18 +524,26 @@ class SpecLAMOST(ConvenientSpecMixin, SpecIOMixin):
         self.fiberid = header['FIBERID']
         self.objid = header['OBJNAME']
         self.objname = header['DESIG']
-        flux = data[0]
-        ivar = data[1]
-        wave = data[2]
-        self.loglam = np.log10(wave)
-        self.and_mask = data[3]
-        self.or_mask = data[4] 
+        if self.flux_calibrated:
+            flux = data[0]
+            ivar = data[1]
+            wave = data[2]
+            self.and_mask = data[3]
+            self.or_mask = data[4] 
+        else:
+            flux = data['FLUX'].flatten()
+            ivar = data['IVAR'].flatten()
+            wave = data['WAVELENGTH'].flatten()
+            self.and_mask = data['ANDMASK'].flatten()
+            self.or_mask = data['ORMASK'].flatten()
+        self.loglam = np.log10(wave)    
         z_pipe = header['z']
         self.redshift = z_pipe
-        ivar = pd.Series(data[1])
-        ivar.replace(0, np.nan, inplace=True)
-        ivar_safe = ivar.interpolate()
-        err = 1./np.sqrt(ivar_safe.values) 
+        ivar[ivar == 0] = np.nan
+        from scipy.interpolate import interp1d
+        f = interp1d(wave, ivar, fill_value=np.nan)
+        ivar = f(wave)
+        err = np.sqrt(1/ivar)
         self.wave = wave * self.wave_unit
         self.flux = flux * self.flux_unit
         self.err = err
@@ -548,98 +551,19 @@ class SpecLAMOST(ConvenientSpecMixin, SpecIOMixin):
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
 
-# class Spiraf(SpecBase):
-#     def __init__(self, fname, redshift=None, ra=None, dec=None, 
-#                  objname=None, perform_rest=False,
-#                  telescope=None, side=None):
-#         hdu = fits.open(fname)
-#         header = hdu[0].header
-#         self.hdu = hdu
-#         self.hducopy = hdu.copy()
-#         objname = header['object']
-#         self.fname = os.path.basename(fname)
-#         basename = os.path.basename(fname)
-#         self.basename = basename
-#         self.fnametrim = re.sub('\.fits$', '_trim.fits', self.fname)
-#         if redshift is None:
-#             try:
-#                 redshift = float(header['redshift'])
-#             except:
-#                 print("Redshift not provided, setting redshift to zero.")
-#                 redshift = 0
-#         if ra is None or dec is None:
-#             try:
-#                 ra = float(header['ra'])
-#                 dec = float(header['dec'])
-#             except:
-#                 coord = SkyCoord(header['RA']+' '+header['DEC'], 
-#                                  frame='icrs',
-#                                  unit=(u.hourangle, u.deg))
-#                 ra = coord.ra.value
-#                 dec = coord.dec.value
-#         if 'J' in objname:
-#             try:
-#                 name = designation(ra, dec, telescope)
-#             except:
-#                 name = objname
-#         else:
-#             name = objname
-#         if side is not None:
-#             name = name + side
-#         self.objname = name
-#         CRVAL1 = hdu[0].header['CRVAL1']
-#         try:
-#             CD1_1 = hdu[0].header['CD1_1']
-#         except:
-#             CD1_1 = hdu[0].header['CDELT1']
-#         CRPIX1 = hdu[0].header['CRPIX1']
-#         self.CRVAL1 = CRVAL1
-#         self.CD1_1 = CD1_1
-#         self.CRPIX1 = CRPIX1
-#         W1 = (1-CRPIX1) * CD1_1 + CRVAL1
-#         data = hdu[0].data
-#         self.data = data
-#         dim = len(data.shape)
-#         self.dim = dim
-#         if dim==1:
-#             num_pt = len(data)
-#             self.len = num_pt
-#             self.wave = np.linspace(W1, 
-#                                     W1 + (num_pt - 1) * CD1_1, 
-#                                     num=num_pt) * u.AA
-#             self.flux = data * u.Unit('erg cm-2 s-1 AA-1') 
-#             self.err = None
-#             self.spec = Spectrum1D(spectral_axis=self.wave, 
-#                                    flux=self.flux)
-#         elif dim==3:
-#             num_pt = data.shape[2]
-#             self.len = num_pt
-#             self.wave = np.linspace(W1, 
-#                                     W1 + (num_pt - 1) * CD1_1, 
-#                                     num=num_pt) * u.AA
-#             self.flux = data[0,0,:]  * u.Unit('erg cm-2 s-1 AA-1') 
-#             self.err = data[3,0,:]
-#             self.spec = Spectrum1D(spectral_axis=self.wave, 
-#                                    flux=self.flux, 
-#                                    uncertainty=StdDevUncertainty(self.err))
-#         else:
-#             print("Warning: format neither onedspec nor multispec (3d)!\n")
-#         self.perform_rest = perform_rest
-#         if perform_rest == True:
-#             self.to_restframe()
-# #         hdu.close()         
 
-# #     def plot(self, axlim='auto'):
-# #         plt.figure(figsize=(8, 6))
-# #         plt.plot(self.wave, self.flux, lw=1)
-# #         # plt.xlim(xrange)
-# #         # plt.xlim(3800, 8300)
-# #         # plt.ylim(bottom=0)
-# #         plt.xlabel(r'$\mathrm{Wavelength(\AA})$')
-# #         plt.ylabel(r'$\mathrm{Flux(erg/s/cm^{2}/\AA)}$')
-# #         # plt.title('Spectrum of ' + self.name.replace('_', ' '))
-# #         plt.title(self.name.replace('_', ' '))
-# # #         plt.savefig(self.fname.strip(".fits") + '_spec.pdf', dpi=300)
+
+#     def plot(self, axlim='auto'):
+#         plt.figure(figsize=(8, 6))
+#         plt.plot(self.wave, self.flux, lw=1)
+#         # plt.xlim(xrange)
+#         # plt.xlim(3800, 8300)
+#         # plt.ylim(bottom=0)
+#         plt.xlabel(r'$\mathrm{Wavelength(\AA})$')
+#         plt.ylabel(r'$\mathrm{Flux(erg/s/cm^{2}/\AA)}$')
+#         # plt.title('Spectrum of ' + self.name.replace('_', ' '))
+#         plt.title(self.name.replace('_', ' '))
+# #         plt.savefig(self.fname.strip(".fits") + '_spec.pdf', dpi=300)
 
     # def trim(self, basepath='./', w1=None, w2=None, output=None):
     #     CRVAL1 = self.CRVAL1

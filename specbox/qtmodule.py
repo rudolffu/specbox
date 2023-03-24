@@ -8,30 +8,63 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
+def iter_by_step(speclist, step=1):
+    for i in range(0, len(speclist), step):
+        yield speclist[i]
 
 class PGSpecPlot(pg.PlotWidget):
     """
     Plot widget for plotting spectra using pyqtgraph.
     """
-    def __init__(self, spec):
+    def __init__(self, speclist, SpecClass=SpecLAMOST):
         super().__init__()
-        self.spec = spec
-        self.plot(spec.wave.value, spec.flux.value, pen='r', 
-                  symbol='o', symbolSize=4, symbolPen=None, connect='finite',
-                  symbolBrush=(255, 0, 0, 255))
+        self.speclist = speclist
+        self.SpecClass = SpecClass
+        self.setWindowTitle("Spectrum")
+        self.resize(1200, 800)
+        self.setBackground('w')
         self.showGrid(x=True, y=True)
-        self.setLabel('left', "Flux", units=spec.flux.unit.to_string())
-        self.setLabel('bottom', "Wavelength", units=spec.wave.unit.to_string())
         self.setMouseEnabled(x=True, y=True)
         self.setLogMode(x=False, y=False)
         self.setAspectLocked(False)
-        self.setRange(xRange=(spec.wave.value.min(), spec.wave.value.max()), yRange=(spec.flux.value.min(), spec.flux.value.max()))
         self.vb = self.getViewBox()
+        self.iter = None
+        self.go_iter()
         self.show()
+
+    def go_iter(self):
+        self.iter = iter_by_step(self.speclist)
+        self.plot_processed()
+        
+    def plot_processed(self):
+        try:
+            specfile = next(self.iter)
+        except StopIteration:
+            self.iter = None
+            pass
+        else:
+            spec = self.SpecClass(specfile)
+            self.spec = spec
+            z_pipe = spec.redshift
+            objname = spec.objname
+            self.plot(spec.wave.value, spec.flux.value, pen='b', 
+                      symbol='o', symbolSize=4, symbolPen=None, connect='finite',
+                      symbolBrush='k', antialias=True)
+            self.text = pg.TextItem(text="Object: {0} \t Z_pipe: {1:.2f}".format(objname, z_pipe), anchor=(0,0), color='r', border='w', fill=(255, 255, 255, 255))
+            # Set the text position to the top left corner of the plot
+            self.text.setPos(spec.wave.value[0]*1.4, spec.flux.value.max()*0.8)
+            self.text.setFont(QFont("Arial", 20, QFont.Bold))
+            self.addItem(self.text)
+            self.setLabel('left', "Flux", units=spec.flux.unit.to_string())
+            self.setLabel('bottom', "Wavelength", units=spec.wave.unit.to_string())
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Q:
-            self.close()    
+            if self.iter is not None and self.iter is not iter_by_step(self.speclist):
+                self.clear()
+                self.plot_processed()
+            else:
+                self.close()
         if event.key() == Qt.Key_M:
             mouse_pos = self.mapFromGlobal(QCursor.pos())
             self.vb = self.getViewBox()
@@ -44,30 +77,41 @@ class PGSpecPlot(pg.PlotWidget):
             idx = np.abs(self.spec.wave.value - wave).argmin()
             wave = self.spec.wave.value[idx]
             flux = self.spec.flux.value[idx]
+            #Add text to the plot at the mouse position
+            self.text = pg.TextItem(text="Wavelength: {0:.2f} Flux: {1:.2f}".format(wave, flux), anchor=(0,0), color='r', border='w', fill=(255, 255, 255, 200))
+            self.text.setPos(wave, flux)
+            self.addItem(self.text)
             print("Wavelength: {0:.2f} Flux: {1:.2f}".format(wave, flux))
+        if event.key() == Qt.Key_S:
+            print("Class: STAR.")
 
 
 class PGSpecPlotApp(QApplication):
-    """
-    Application for plotting spectra using pyqtgraph.
-    """
-    def __init__(self, spec):
+    def __init__(self, speclist, SpecClass=SpecLAMOST):
         super().__init__(sys.argv)
-        self.w = PGSpecPlot(spec)
-        self.w.show()
+        self.speclist = speclist
+        self.SpecClass = SpecClass
+        self.plot = PGSpecPlot(self.speclist, self.SpecClass)
+        self.plot.show()
         self.exec_()
+        self.exit() 
+        sys.exit()    
 
 class PGSpecPlotThread(QThread):
-    """
-    Thread for plotting spectra using pyqtgraph.
-    """
-    def __init__(self, spec):
+    def __init__(self, speclist, SpecClass=SpecLAMOST):
         super().__init__()
-        self.spec = spec
+        self.speclist = speclist
+        self.SpecClass = SpecClass
+        # Run the PGSpecPlotApp in a thread
+        self.app = PGSpecPlotApp(self.speclist, self.SpecClass)
+        # Exit the thread when the app is closed
+        self.app.aboutToQuit.connect(self.exit)
 
     def run(self):
-        self.app = PGSpecPlotApp(self.spec)
-
+        self.app.exec_()
+        self.exit()
+        sys.exit()
+        
 
 class MatSpecPlot(FigureCanvas):
     """
