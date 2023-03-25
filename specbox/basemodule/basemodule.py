@@ -8,16 +8,17 @@ import matplotlib.pyplot as plt
 import os
 from PyAstronomy import pyasl
 from scipy.signal import savgol_filter
-from scipy.stats import sigmaclip
 from pathlib import Path
 from astropy.nddata import StdDevUncertainty,VarianceUncertainty,InverseVariance
 from astropy.table import Table
 from astropy import units as u
+from astropy.coordinates import SkyCoord
 from specutils import Spectrum1D,SpectrumCollection,SpectrumList
 from specutils.manipulation import FluxConservingResampler, LinearInterpolatedResampler, SplineInterpolatedResampler, median_smooth
-from .auxmodule import *
+from ..auxmodule  import designation
 import warnings
 from astropy.units import Quantity
+from astropy.stats import sigma_clip
 
 
 class ConvenientSpecMixin():
@@ -156,7 +157,7 @@ class ConvenientSpecMixin():
         self.flux = self.spec.flux
         return self
     
-    def smooth(self, window_length, polyorder, plot=True, inplace=False, **kwargs):
+    def smooth(self, window_length, polyorder, plot=True, inplace=False, sigclip=False, **kwargs):
         """
         Smooth the spectrum with scipy.signal.savgol_filter.
         Parameters:
@@ -178,6 +179,9 @@ class ConvenientSpecMixin():
                                 window_length=window_length,
                                 polyorder=polyorder,
                                 **kwargs) 
+        if sigclip == True:
+            flux_sm = sigma_clip(flux_sm, sigma=6, maxiters=4)
+            flux_sm = flux_sm.filled(0.0)
         flux_sm = flux_sm * self.flux.unit
         self.flux_sm = flux_sm
         if plot == True:

@@ -2,7 +2,8 @@ from PyQt5.QtGui import QIcon, QIntValidator, QDoubleValidator, QRegExpValidator
 from PyQt5.QtCore import Qt, QRegExp, QThread, pyqtSignal, pyqtSlot, QCoreApplication, QSettings, QTranslator, QLocale, QLibraryInfo, QEvent, QEventLoop, QTimer, QUrl
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QFileDialog, QGridLayout, QLabel, QComboBox, QCheckBox, QSpinBox, QDoubleSpinBox, QProgressBar, QSizePolicy, QGroupBox, QRadioButton, QButtonGroup, QPlainTextEdit, QInputDialog, QLineEdit, QTabWidget, QScrollArea, QFrame, QStackedWidget, QStackedLayout, QFormLayout, QLayout, QLayoutItem, QSpacerItem, QSizePolicy, QMainWindow, QListWidget
 import sys
-from specbox.base import *
+from ..basemodule import SpecLAMOST
+from ..basemodule import *
 import pyqtgraph as pg
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -14,13 +15,17 @@ from astropy.io import fits
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 import pandas as pd
+# locate the data file in the package
+import pkg_resources
 
+data_path = pkg_resources.resource_filename('specbox', 'data/')
 
 def iter_by_step(speclist, step=1):
     for i in range(0, len(speclist), step):
         yield speclist[i]
 
 my_dict = {}
+tb_temp = Table.read(data_path + 'qso_temp_vandenberk2001.mrt.txt', format='ascii')
 
 class PGSpecPlot(pg.PlotWidget):
     """
@@ -43,12 +48,13 @@ class PGSpecPlot(pg.PlotWidget):
         # Enable Mouse selection for zooming
         self.vb.setMouseMode(self.vb.RectMode)
         self.iter = None
+        self.message = ''
         self.counter = 0
         self.go_iter()
 
     def go_iter(self):
         self.iter = iter_by_step(self.speclist)
-        self.plot_processed()
+        self.plot_next()
 
     def plot_single(self):
         spec = self.spec
@@ -57,27 +63,53 @@ class PGSpecPlot(pg.PlotWidget):
         self.plot(spec.wave.value, spec.flux.value, pen='b', 
                       symbol='o', symbolSize=4, symbolPen=None, connect='finite',
                       symbolBrush='k', antialias=True)
+        if z_pipe >= 0.0:
+            wave_temp = tb_temp['Wave'].data * (1+z_pipe)
+            idx = np.where((wave_temp>=3800) & (wave_temp<=9020))
+            flux_temp = tb_temp['FluxD'].data
+            wave_temp = wave_temp[idx]
+            flux_temp = flux_temp[idx] / np.mean(flux_temp[idx])  * spec.flux.value.mean() * 1.5
+            self.plot(wave_temp, flux_temp, pen=(240,128,128), symbol='+', symbolSize=2, symbolPen=None, connect='finite', symbolBrush=(240,128,128), antialias=True)        
         # Label the objname and redshift on the top center of the plot
-        self.text = pg.TextItem(text="Objname: {0} \t Z_pipe = {1:.2f}".format(objname, z_pipe), anchor=(0,0), color='r', border='w', fill=(255, 255, 255, 200))
-        self.text.setPos(spec.wave.value[0] * 1.3, spec.flux.value.max() * 0.9)
+        self.text = pg.TextItem(text="{0}  {1}  Z_pipe = {2:.2f}".format(
+            self.message, objname, z_pipe), anchor=(0,0), color='k', border='w', fill=(255, 255, 255, 200))
+        self.text.setPos(spec.wave.value[0] * 1.3, spec.flux.value.max() * 1.3)
+        self.text.setFont(QFont("Arial", 14))
         self.addItem(self.text)
         self.setLabel('left', "Flux", units=spec.flux.unit.to_string())
         self.setLabel('bottom', "Wavelength", units=spec.wave.unit.to_string())
-        # Auto scale the plot
         self.autoRange()
         
-    def plot_processed(self):
+    def plot_next(self):
         try:
             specfile = next(self.iter)
             self.counter += 1
+            self.message = "Spectrum {0}/{1}.".format(self.counter, len(self.speclist))
+            print(self.message)
             spec = self.SpecClass(specfile)
-            spec.trim([3800, 9080])
-            spec.smooth(5, 3, inplace=True, plot=False)
+            spec.trim([3800, 9020])
+            spec.smooth(5, 3, inplace=True, plot=False, sigclip=True)
             self.spec = spec
             self.plot_single()
         except StopIteration:
             self.iter = None
             self.close()
+
+    def plot_previous(self):
+        if self.iter is not None and self.counter > 1:
+            print("Plotting previous spectrum...")
+            self.counter -= 1
+            self.message = "Spectrum {0}/{1}.".format(self.counter, len(self.speclist))
+            print(self.message)
+            self.clear()
+            specfile = self.speclist[self.counter-1]
+            spec = self.SpecClass(specfile)
+            spec.trim([3800, 9020])
+            spec.smooth(5, 3, inplace=True, plot=False, sigclip=True)
+            self.spec = spec
+            self.plot_single()
+        elif self.counter == 1:
+            print("No previous spectrum to plot.")
 
     def keyPressEvent(self, event):
         spec = self.spec
@@ -86,9 +118,9 @@ class PGSpecPlot(pg.PlotWidget):
                 my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'QSO(Default)']
             if self.iter is not None and self.counter < len(self.speclist):
                 self.clear()
-                self.plot_processed()
+                self.plot_next()
             if self.counter % 50 == 0:
-                print("Periodically saving temp file to csv (n={})...".format(self.counter))
+                print("Saving temp file to csv (n={})...".format(self.counter))
                 df = pd.DataFrame.from_dict(my_dict, orient='index')
                 df.rename(columns={0:'objname', 1:'ra', 2:'dec', 3:'vi_class'}, inplace=True)
                 df['objid'] = df.index.values
@@ -131,7 +163,11 @@ class PGSpecPlot(pg.PlotWidget):
         if event.key() == Qt.Key_R:
             # Reset the plot to the original state
             self.clear()
-            self.plot_single()           
+            self.plot_single()   
+        # if the user presses the key combination Ctrl+Left, plot the previous spectrum
+        if event.modifiers() & Qt.ControlModifier:
+            if event.key() == Qt.Key_Left:
+                self.plot_previous()
             
 
 class PGSpecPlotApp(QApplication):
@@ -155,12 +191,12 @@ class PGSpecPlotApp(QApplication):
         layout.resize(1200, 800)
         layout.setWindowTitle("PGSpecPlot - LAMOST Spectra Viewer (v1.0)")
         if self.plot.iter is not None and self.plot.counter < len(self.speclist):
-            toplabel = layout.addLabel("Press 'Q' for next image, \t\t press no key or 'A' to set class as QSO(AGN), \n\
+            toplabel = layout.addLabel("Press 'Q' for next spectrum, \t press no key or 'A' to set class as QSO(AGN), \n\
 'S' to set class as STAR, \t\t 'G' to set class as GALAXY, \n'U' to set class as UNKNOWN, \t 'L' to set class as LIKELY/Unusual QSO, \n\
 'M' to get mouse position, \t\t 'Space' to get spectrum value at current wavelength.\n\
-Use mouse scroll to zoom in/out, \t use mouse select to zoom in. \t Press 'R' to reset the plot to the original state.", row=0, col=0, colspan=2)
+Use mouse scroll to zoom in/out, \t use mouse select to zoom in. \t Press 'R' to reset the plot to the original state. \nPress 'Ctrl+Left' (MacOS: 'Command+Left') to plot the previous spectrum.", row=0, col=0, colspan=2)
             toplabel.setFont(QFont("Arial", 16))
-            toplabel.setFixedHeight(120)
+            toplabel.setFixedHeight(140)
             toplabel.setAlignment(Qt.AlignLeft)
             toplabel.setStyleSheet("background-color: white")
             toplabel.setFrameStyle(QFrame.Panel | QFrame.Raised)
