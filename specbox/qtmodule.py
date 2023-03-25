@@ -37,7 +37,11 @@ class PGSpecPlot(pg.PlotWidget):
         self.setMouseEnabled(x=True, y=True)
         self.setLogMode(x=False, y=False)
         self.setAspectLocked(False)
+        # Show auto-range button
+        self.enableAutoRange()
         self.vb = self.getViewBox()
+        # Enable Mouse selection for zooming
+        self.vb.setMouseMode(self.vb.RectMode)
         self.iter = None
         self.counter = 0
         self.go_iter()
@@ -45,25 +49,32 @@ class PGSpecPlot(pg.PlotWidget):
     def go_iter(self):
         self.iter = iter_by_step(self.speclist)
         self.plot_processed()
+
+    def plot_single(self):
+        spec = self.spec
+        z_pipe = spec.redshift
+        objname = spec.objname
+        self.plot(spec.wave.value, spec.flux.value, pen='b', 
+                      symbol='o', symbolSize=4, symbolPen=None, connect='finite',
+                      symbolBrush='k', antialias=True)
+        # Label the objname and redshift on the top center of the plot
+        self.text = pg.TextItem(text="Objname: {0} \t Z_pipe = {1:.2f}".format(objname, z_pipe), anchor=(0,0), color='r', border='w', fill=(255, 255, 255, 200))
+        self.text.setPos(spec.wave.value[0] * 1.3, spec.flux.value.max() * 0.9)
+        self.addItem(self.text)
+        self.setLabel('left', "Flux", units=spec.flux.unit.to_string())
+        self.setLabel('bottom', "Wavelength", units=spec.wave.unit.to_string())
+        # Auto scale the plot
+        self.autoRange()
         
     def plot_processed(self):
         try:
             specfile = next(self.iter)
             self.counter += 1
             spec = self.SpecClass(specfile)
+            spec.trim([3800, 9080])
             spec.smooth(5, 3, inplace=True, plot=False)
             self.spec = spec
-            z_pipe = spec.redshift
-            objname = spec.objname
-            self.plot(spec.wave.value, spec.flux.value, pen='b', 
-                      symbol='o', symbolSize=4, symbolPen=None, connect='finite',
-                      symbolBrush='k', antialias=True)
-            # Label the objname and redshift on the top center of the plot
-            self.text = pg.TextItem(text="Objname: {0} \t Z_pipe = {1:.2f}".format(objname, z_pipe), anchor=(0,0), color='r', border='w', fill=(255, 255, 255, 200))
-            self.text.setPos(spec.wave.value[0] * 1.3, spec.flux.value.max() * 0.9)
-            self.addItem(self.text)
-            self.setLabel('left', "Flux", units=spec.flux.unit.to_string())
-            self.setLabel('bottom', "Wavelength", units=spec.wave.unit.to_string())
+            self.plot_single()
         except StopIteration:
             self.iter = None
             self.close()
@@ -76,6 +87,14 @@ class PGSpecPlot(pg.PlotWidget):
             if self.iter is not None and self.counter < len(self.speclist):
                 self.clear()
                 self.plot_processed()
+            if self.counter % 50 == 0:
+                print("Periodically saving temp file to csv (n={})...".format(self.counter))
+                df = pd.DataFrame.from_dict(my_dict, orient='index')
+                df.rename(columns={0:'objname', 1:'ra', 2:'dec', 3:'vi_class'}, inplace=True)
+                df['objid'] = df.index.values
+                df.set_index(np.arange(len(df)), inplace=True)
+                df.to_csv('vi_temp_{}.csv'.format(self.counter), 
+                          index=False)
         if event.key() == Qt.Key_M:
             mouse_pos = self.mapFromGlobal(QCursor.pos())
             self.vb = self.getViewBox()
@@ -90,6 +109,7 @@ class PGSpecPlot(pg.PlotWidget):
             flux = self.spec.flux.value[idx]
             #Add text to the plot at the mouse position
             self.text = pg.TextItem(text="Wavelength: {0:.2f} Flux: {1:.2f}".format(wave, flux), anchor=(0,0), color='r', border='w', fill=(255, 255, 255, 200))
+            self.text.setFont(QFont("Arial", 18, QFont.Bold))
             self.text.setPos(wave, flux)
             self.addItem(self.text)
             print("Wavelength: {0:.2f} Flux: {1:.2f}".format(wave, flux))
@@ -108,17 +128,22 @@ class PGSpecPlot(pg.PlotWidget):
         if event.key() == Qt.Key_L:
             print("Class: LIKELY/Unusual QSO.")
             my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'LIKELY']
+        if event.key() == Qt.Key_R:
+            # Reset the plot to the original state
+            self.clear()
+            self.plot_single()           
+            
 
 class PGSpecPlotApp(QApplication):
-    def __init__(self, speclist, SpecClass=SpecLAMOST):
+    def __init__(self, speclist, SpecClass=SpecLAMOST, 
+                 output_file='vi_output.csv'):
         super().__init__(sys.argv)
+        self.output_file = output_file
         self.speclist = speclist
         self.SpecClass = SpecClass
         self.plot = PGSpecPlot(self.speclist, self.SpecClass)
         self.make_layout()
         # self.layout.show()
-        self.my_dict = my_dict
-        self.save_dict_todf()
         self.exec_()
         self.my_dict = my_dict
         self.save_dict_todf()
@@ -128,12 +153,14 @@ class PGSpecPlotApp(QApplication):
     def make_layout(self):
         layout = pg.LayoutWidget()
         layout.resize(1200, 800)
+        layout.setWindowTitle("PGSpecPlot - LAMOST Spectra Viewer (v1.0)")
         if self.plot.iter is not None and self.plot.counter < len(self.speclist):
-            toplabel = layout.addLabel("Press 'Q' for next image, \t press no key or 'A' to set class as QSO(AGN), \n\
-'S' to set class as STAR, \t 'G' to set class as GALAXY, \n'U' to set class as UNKNOWN, \t 'L' to set class as LIKELY/Unusual QSO, \n\
-'M' to get mouse position, \t 'Space' to get spectrum value at current wavelength.", row=0, col=0, colspan=2)
+            toplabel = layout.addLabel("Press 'Q' for next image, \t\t press no key or 'A' to set class as QSO(AGN), \n\
+'S' to set class as STAR, \t\t 'G' to set class as GALAXY, \n'U' to set class as UNKNOWN, \t 'L' to set class as LIKELY/Unusual QSO, \n\
+'M' to get mouse position, \t\t 'Space' to get spectrum value at current wavelength.\n\
+Use mouse scroll to zoom in/out, \t use mouse select to zoom in. \t Press 'R' to reset the plot to the original state.", row=0, col=0, colspan=2)
             toplabel.setFont(QFont("Arial", 16))
-            toplabel.setFixedHeight(100)
+            toplabel.setFixedHeight(120)
             toplabel.setAlignment(Qt.AlignLeft)
             toplabel.setStyleSheet("background-color: white")
             toplabel.setFrameStyle(QFrame.Panel | QFrame.Raised)
@@ -143,20 +170,6 @@ class PGSpecPlotApp(QApplication):
             toplabel.setMargin(5)
             toplabel.setIndent(5)
             toplabel.setWordWrap(True)
-            # secondlabel = layout.addLabel("Object: {0} \t Z_pipe = {1:.2f}".format(self.plot.spec.objname, 
-            #                                                                       self.plot.spec.redshift), 
-            #                                                                       row=1, col=0, colspan=2)
-            # secondlabel.setFont(QFont("Arial", 18, QFont.Bold))
-            # secondlabel.setFixedHeight(50)
-            # secondlabel.setAlignment(Qt.AlignCenter)
-            # secondlabel.setStyleSheet("background-color: white")
-            # secondlabel.setFrameStyle(QFrame.Panel | QFrame.Raised)
-            # secondlabel.setLineWidth(2)
-            # secondlabel.setMidLineWidth(2)
-            # secondlabel.setFrameShadow(QFrame.Sunken)
-            # secondlabel.setMargin(10)
-            # secondlabel.setIndent(10)
-            # secondlabel.setWordWrap(True)
             layout.addWidget(self.plot, row=1, col=0, colspan=2) 
             self.layout = layout
             self.layout.show()
@@ -172,31 +185,26 @@ class PGSpecPlotApp(QApplication):
                 sys.exit()
         else:
             self.plot.keyPressEvent(event)
+
+    def mousePressEvent(self, event):
+        self.plot.mousePressEvent(event)
     
     def save_dict_todf(self):
         self.my_dict = my_dict
-        if self.plot.counter % 50 == 0:
-            print("Saving temp file to csv...")
-            df = pd.DataFrame.from_dict(self.my_dict, orient='index')
-            df.rename(columns={0:'objname', 1:'ra', 2:'dec', 3:'vi_class'}, inplace=True)
-            df['objid'] = df.index.values
-            df.set_index(np.arange(len(df)), inplace=True)
-            df.to_csv('vi_nonqso_temp.csv', index=False)
-        # if self.my_dict:
         df = pd.DataFrame.from_dict(self.my_dict, orient='index')
         df.rename(columns={0:'objname', 1:'ra', 2:'dec', 3:'vi_class'}, inplace=True)
         df['objid'] = df.index.values
         df.set_index(np.arange(len(df)), inplace=True)
-        df.to_csv('vi_nonqso.csv', index=False)
+        df.to_csv(self.output_file, index=False)
 
 
 class PGSpecPlotThread(QThread):
-    def __init__(self, speclist, SpecClass=SpecLAMOST):
+    def __init__(self, speclist, SpecClass=SpecLAMOST, **kwargs):
         super().__init__()
         self.speclist = speclist
         self.SpecClass = SpecClass
         # Run the PGSpecPlotApp in a thread
-        self.app = PGSpecPlotApp(self.speclist, self.SpecClass)
+        self.app = PGSpecPlotApp(self.speclist, self.SpecClass, **kwargs)
         # Exit the thread when the app is closed
         self.app.aboutToQuit.connect(self.exit)
 

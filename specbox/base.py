@@ -135,17 +135,18 @@ class ConvenientSpecMixin():
     def _has_uncertainty(self):
         return self.spec.uncertainty is not None
     
-    def trim(self, wave_range, inplace=True):
+    def trim(self, wave_range):
         wave = self.wave.value
         idx = (wave >= wave_range[0]) & (wave <= wave_range[1])
-        # if not inplace:
-        #     return self.copy().trim(wave_range, inplace=True)
-        self.wave = self.wave[idx]
+        self.trimmed = True
         self.flux = self.flux[idx]
-        if self._has_uncertainty():
-            self.err = self.err[idx]
+        self.wave = self.wave[idx]
+        self.err = self.err[idx]
+        self.spec = Spectrum1D(spectral_axis=self.wave, 
+                               flux=self.flux, 
+                               uncertainty=StdDevUncertainty(self.err)) 
         return self
-    
+
     def flux_conserve_resample(self, wave, inplace=False):
         # if not inplace:
         #     return self.copy().flux_conserve_resample(wave, inplace=True)
