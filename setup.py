@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="specbox",
-    version="0.0.1",
+    version="0.1.0-alpha",
     author="Yuming Fu",
     author_email="fuympku@outlook.com",
     description=" ",
@@ -18,5 +18,5 @@ setuptools.setup(
         "License :: OSI Approved :: GNU GENERAL PUBLIC LICENSE V3",
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.7',
 )
