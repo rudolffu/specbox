@@ -8,6 +8,10 @@ A simple tool to manipulate and visualize optical spectra for astronomical resea
 - `astropy`
 - `pyqtgraph`
 - `pyqt5`
+- `specutils`
+- `matplotlib`
+- `pandas`
+- `PyAstronomy`
 
 To install the latest version of specbox, run the following command in your terminal:
 
