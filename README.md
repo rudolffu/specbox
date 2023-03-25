@@ -53,3 +53,4 @@ flist = flist[0:60]
 a = PGSpecPlotThread(speclist=flist, SpecClass=SpecLAMOST, output_file='vi_output_test60.csv')
 a.run()
 ```
+<img src="specbox/docs/figs/PGSpecPlotThread_example.jpg" width="600">
