@@ -1,6 +1,9 @@
-from PyQt5.QtGui import QIcon, QIntValidator, QDoubleValidator, QRegExpValidator, QPalette, QColor, QBrush, QCursor, QFont, QKeySequence
-from PyQt5.QtCore import Qt, QRegExp, QThread, pyqtSignal, pyqtSlot, QCoreApplication, QSettings, QTranslator, QLocale, QLibraryInfo, QEvent, QEventLoop, QTimer, QUrl
-from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QFileDialog, QGridLayout, QLabel, QComboBox, QCheckBox, QSpinBox, QDoubleSpinBox, QProgressBar, QSizePolicy, QGroupBox, QRadioButton, QButtonGroup, QPlainTextEdit, QInputDialog, QLineEdit, QTabWidget, QScrollArea, QFrame, QStackedWidget, QStackedLayout, QFormLayout, QLayout, QLayoutItem, QSpacerItem, QSizePolicy, QMainWindow, QListWidget
+from PyQt5.QtGui import QCursor, QFont 
+# from PyQt5.QtGui import QIcon, QIntValidator, QDoubleValidator, QRegExpValidator, QPalette, QColor, QBrush, QKeySequence
+from PyQt5.QtCore import Qt, QThread
+# from PyQt5.QtCore import QRegExp, pyqtSignal, pyqtSlot, QCoreApplication, QSettings, QTranslator, QLocale, QLibraryInfo, QEvent, QEventLoop, QTimer, QUrl
+from PyQt5.QtWidgets import QApplication, QFrame, QWidget
+# from PyQt5.QtWidgets import QPushButton, QFileDialog, QGridLayout, QLabel, QComboBox, QCheckBox, QSpinBox, QDoubleSpinBox, QProgressBar, QSizePolicy, QGroupBox, QRadioButton, QButtonGroup, QPlainTextEdit, QInputDialog, QLineEdit, QTabWidget, QScrollArea, QStackedWidget, QStackedLayout, QFormLayout, QLayout, QLayoutItem, QSpacerItem, QSizePolicy, QMainWindow, QListWidget
 import sys
 from ..basemodule import SpecLAMOST
 from ..basemodule import *
