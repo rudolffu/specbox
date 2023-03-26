@@ -8,11 +8,12 @@ setuptools.setup(
     version="0.1.0-alpha",
     author="Yuming Fu",
     author_email="fuympku@outlook.com",
-    description=" ",
+    description="specbox - A simple tool to manipulate and visualize optical spectra for astronomical research.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/rudolffu/specbox",
     packages=setuptools.find_packages(),
+    include_package_data=True,
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU GENERAL PUBLIC LICENSE V3",
