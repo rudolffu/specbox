@@ -23,10 +23,6 @@ import pkg_resources
 
 data_path = pkg_resources.resource_filename('specbox', 'data/')
 
-def iter_by_step(speclist, step=1):
-    for i in range(0, len(speclist), step):
-        yield speclist[i]
-
 my_dict = {}
 tb_temp = Table.read(data_path + 'qso_temp_vandenberk2001.mrt.txt', format='ascii')
 
@@ -50,14 +46,10 @@ class PGSpecPlot(pg.PlotWidget):
         self.vb = self.getViewBox()
         # Enable Mouse selection for zooming
         self.vb.setMouseMode(self.vb.RectMode)
-        self.iter = None
         self.message = ''
         self.counter = 0
-        self.go_iter()
-
-    def go_iter(self):
-        self.iter = iter_by_step(self.speclist)
         self.plot_next()
+
 
     def plot_single(self):
         spec = self.spec
@@ -66,14 +58,22 @@ class PGSpecPlot(pg.PlotWidget):
         self.plot(spec.wave.value, spec.flux.value, pen='b', 
                       symbol='o', symbolSize=4, symbolPen=None, connect='finite',
                       symbolBrush='k', antialias=True)
+        try:
+            idx_poor = np.where(spec.flux.value/spec.err < 2)
+            line_poor = self.plot(spec.wave.value[idx_poor], spec.flux.value[idx_poor], pen='r', 
+                                  symbol='x', symbolSize=4, symbolPen=None, connect='finite',
+                                  symbolBrush=(200,0,0,80), antialias=True, name='SNR lower than 2')
+            self.line_poor = line_poor
+        except:
+            pass
         if z_pipe >= 0.0:
             wave_temp = tb_temp['Wave'].data * (1+z_pipe)
             idx = np.where((wave_temp>=3800) & (wave_temp<=9020))
             flux_temp = tb_temp['FluxD'].data
             wave_temp = wave_temp[idx]
             flux_temp = flux_temp[idx] / np.mean(flux_temp[idx])  * spec.flux.value.mean() * 1.5
-            self.plot(wave_temp, flux_temp, pen=(240,128,128), symbol='+', symbolSize=2, symbolPen=None, connect='finite', symbolBrush=(240,128,128), antialias=True)        
-        # Label the objname and redshift on the top center of the plot
+            self.plot(wave_temp, flux_temp, pen=(240,128,128), symbol='+', symbolSize=2, symbolPen=(135, 190, 135), connect='finite', symbolBrush=(135, 190, 135), antialias=False)     
+        self.legend = self.addLegend(labelTextSize='16pt')  
         self.text = pg.TextItem(text="{0}  {1}  Z_pipe = {2:.2f}".format(
             self.message, objname, z_pipe), anchor=(0,0), color='k', border='w', fill=(255, 255, 255, 200))
         self.text.setPos(spec.wave.value[0] * 1.3, spec.flux.value.max() * 1.3)
@@ -84,24 +84,24 @@ class PGSpecPlot(pg.PlotWidget):
         self.autoRange()
         
     def plot_next(self):
-        try:
-            specfile = next(self.iter)
-            self.counter += 1
-            self.message = "Spectrum {0}/{1}.".format(self.counter, len(self.speclist))
-            print(self.message)
-            spec = self.SpecClass(specfile)
-            spec.trim([3800, 9020])
-            spec.smooth(5, 3, inplace=True, plot=False, sigclip=True)
-            self.spec = spec
-            self.plot_single()
-        except StopIteration:
-            self.iter = None
-            self.close()
+        specfile = self.speclist[self.counter]
+        self.message = "Spectrum {0}/{1}.".format(self.counter+1, len(self.speclist))
+        print(self.message)
+        spec = self.SpecClass(specfile)
+        spec.trim([3800, 9020])
+        spec.smooth(5, 3, inplace=True, plot=False, sigclip=True)
+        self.spec = spec
+        if hasattr(self, 'line_poor'):
+            try:
+                self.legend.removeItem(self.line_poor)
+            except:
+                pass
+        self.plot_single()
+        self.counter += 1
 
     def plot_previous(self):
-        if self.iter is not None and self.counter > 1:
+        if self.counter >= 1:
             print("Plotting previous spectrum...")
-            self.counter -= 1
             self.message = "Spectrum {0}/{1}.".format(self.counter, len(self.speclist))
             print(self.message)
             self.clear()
@@ -110,8 +110,14 @@ class PGSpecPlot(pg.PlotWidget):
             spec.trim([3800, 9020])
             spec.smooth(5, 3, inplace=True, plot=False, sigclip=True)
             self.spec = spec
+            if hasattr(self, 'line_poor'):
+                try:
+                    self.legend.removeItem(self.line_poor)
+                except:
+                    pass
+            self.counter -= 1
             self.plot_single()
-        elif self.counter == 1:
+        elif self.counter == 0:
             print("No previous spectrum to plot.")
 
     def keyPressEvent(self, event):
@@ -119,9 +125,11 @@ class PGSpecPlot(pg.PlotWidget):
         if event.key() == Qt.Key_Q:
             if spec.objid not in my_dict:
                 my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'QSO(Default)']
-            if self.iter is not None and self.counter < len(self.speclist):
+            if self.counter < len(self.speclist):
                 self.clear()
                 self.plot_next()
+            else:
+                print("No more spectra to plot.")
             if self.counter % 50 == 0:
                 print("Saving temp file to csv (n={})...".format(self.counter))
                 df = pd.DataFrame.from_dict(my_dict, orient='index')
@@ -193,7 +201,7 @@ class PGSpecPlotApp(QApplication):
         layout = pg.LayoutWidget()
         layout.resize(1200, 800)
         layout.setWindowTitle("PGSpecPlot - LAMOST Spectra Viewer (v1.0)")
-        if self.plot.iter is not None and self.plot.counter < len(self.speclist):
+        if self.plot.counter < len(self.speclist):
             toplabel = layout.addLabel("Press 'Q' for next spectrum, \t press no key or 'A' to set class as QSO(AGN), \n\
 'S' to set class as STAR, \t\t 'G' to set class as GALAXY, \n'U' to set class as UNKNOWN, \t 'L' to set class as LIKELY/Unusual QSO, \n\
 'M' to get mouse position, \t\t 'Space' to get spectrum value at current wavelength.\n\
@@ -215,7 +223,7 @@ Use mouse scroll to zoom in/out, \t use mouse select to zoom in. \t Press 'R' to
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Q:
-            if self.plot.iter is not None and self.plot.counter < len(self.speclist):
+            if self.plot.counter < len(self.speclist)-1:
                 self.plot.keyPressEvent(event)
             else:
                 self.plot.close()
