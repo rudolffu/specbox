@@ -13,6 +13,9 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/rudolffu/specbox",
     packages=setuptools.find_packages(),
+    package_data={
+        'specbox': ['data/*'],
+    },
     include_package_data=True,
     classifiers=[
         "Programming Language :: Python :: 3",
