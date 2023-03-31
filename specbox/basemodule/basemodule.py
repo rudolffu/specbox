@@ -297,7 +297,11 @@ class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
         """
         super().read(filename, **kwargs)
         header = self.hdr
-        data = self.data
+        hdu = self.hdu
+        if hdu[0].data:
+            data = hdu[0].data
+        else:
+            data = hdu[1].data
         self.loglam = data['loglam']
         self.wave = 10**data['loglam'] * self.wave_unit
         self.flux = data['flux'] * self.flux_unit
@@ -311,8 +315,8 @@ class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
         self.plateid = header['PLATEID']
         self.mjd = header['MJD']
         self.fiberid = header['FIBERID']
-        self.and_mask = header['AND_MASK']
-        self.or_mask = header['OR_MASK']
+        self.and_mask = data['AND_MASK']
+        self.or_mask = data['OR_MASK']
         redshift = kwargs.get('redshift', None)
         if redshift is None:
             try: 
