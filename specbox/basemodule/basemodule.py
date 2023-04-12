@@ -169,6 +169,18 @@ class ConvenientSpecMixin():
             polyorder : int
                 The order of the polynomial used to fit the samples.
                 `polyorder` must be less than `window_length`.
+            plot : bool
+                Plot the smoothed spectrum.
+            inplace : bool
+                Replace the original spectrum with the smoothed one.
+            sigclip : bool
+                Sigma clip the smoothed spectrum.
+            **kwargs : dict
+                Keyword arguments for scipy.signal.savgol_filter.
+        Returns:
+        -------
+            self : ConvenientSpecMixin
+                The smoothed spectrum.
         """
         if hasattr(self, 'flux_ori'):
             warnings.warn('The original spectrum is already replaced by the smoothed one. \
