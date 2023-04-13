@@ -326,22 +326,22 @@ class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
             self.dec = header['dec']        # DEC
         self.plateid = header['PLATEID']
         self.mjd = header['MJD']
+        self.objid = header['SPEC_ID']
         self.fiberid = header['FIBERID']
         self.and_mask = data['AND_MASK']
         self.or_mask = data['OR_MASK']
         redshift = kwargs.get('redshift', None)
         if redshift is None:
             try: 
-                redshift = self.hdu[2].data['Z']
+                redshift = self.hdu[2].data['Z'][0]
             except:
                 redshift = header['Z']
-            finally:
-                redshift = None
         self.redshift = redshift
         # self.objname = self.hdr['OBJNAME']
         self.spec = Spectrum1D(spectral_axis=self.wave, flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
         self.filename = filename
+        self.objname = designation(self.ra, self.dec)
 
     def write(self, filename, **kwargs):
         self.loglam = np.log10(self.wave.value)

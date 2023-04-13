@@ -261,32 +261,113 @@ class PGSpecPlotThread(QThread):
         sys.exit()
         
 
-class MatSpecPlot(FigureCanvas):
-    """
-    Plot widget for plotting spectra using matplotlib.
-    """
-    def __init__(self, spec):
-        self.fig = Figure()
-        self.ax = self.fig.add_subplot(111)
-        self.ax.plot(spec.wave.value, spec.flux.value, 'r.')
-        self.ax.set_xlabel('Wavelength (A)')
-        self.ax.set_ylabel('Flux (erg/s/cm^2/A)')
-        self.ax.set_title('Spectrum')
-        super().__init__(self.fig)
-        self.show()
-
-    def closeEvent(self, event):
-        self.close()
-        event.accept()
+class PGSpecPlotFeLo(PGSpecPlot):
+    def __init__(self, speclist, SpecClass=SpecSDSS, **kwargs):
+        super().__init__(speclist, SpecClass, **kwargs)
 
     def keyPressEvent(self, event):
+        spec = self.spec
         if event.key() == Qt.Key_Q:
-            self.close()
-        else:
-            super().keyPressEvent(event)
+            if spec.objid not in my_dict:
+                my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'QSO(Default)']
+            if self.counter < len(self.speclist):
+                self.clear()
+                self.plot_next()
+            else:
+                print("No more spectra to plot.")
+            if self.counter % 50 == 0:
+                print("Saving temp file to csv (n={})...".format(self.counter))
+                df = pd.DataFrame.from_dict(my_dict, orient='index')
+                df.rename(columns={0:'objname', 1:'ra', 2:'dec', 3:'vi_class'}, inplace=True)
+                df['objid'] = df.index.values
+                df.set_index(np.arange(len(df)), inplace=True)
+                df.to_csv('vi_temp_{}.csv'.format(self.counter), 
+                          index=False)
+        if event.key() == Qt.Key_M:
+            mouse_pos = self.mapFromGlobal(QCursor.pos())
+            self.vb = self.getViewBox()
+            mouse_pos = self.vb.mapSceneToView(mouse_pos)
+            print(mouse_pos)
+        if event.key() == Qt.Key_Space:
+            mouse_pos = self.mapFromGlobal(QCursor.pos())
+            self.vb = self.getViewBox()
+            wave = self.vb.mapSceneToView(mouse_pos).x()
+            idx = np.abs(self.spec.wave.value - wave).argmin()
+            wave = self.spec.wave.value[idx]
+            flux = self.spec.flux.value[idx]
+            #Add text to the plot at the mouse position
+            self.text = pg.TextItem(text="Wavelength: {0:.2f} Flux: {1:.2f}".format(wave, flux), anchor=(0,0), color='r', border='w', fill=(255, 255, 255, 200))
+            self.text.setFont(QFont("Arial", 18, QFont.Bold))
+            self.text.setPos(wave, flux)
+            self.addItem(self.text)
+            print("Wavelength: {0:.2f} Flux: {1:.2f}".format(wave, flux))
+        if event.key() == Qt.Key_F:
+            print("Class: FeLoBAL QSO.")
+            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'FeLoBAL']
+        if event.key() == Qt.Key_N:
+            print("Class: Non-FeLoBAL QSO.")
+            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'Non-FeLoBAL']
+        if event.key() == Qt.Key_U:
+            print("Class: UNKNOWN.")
+            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'UNKNOWN']
+        if event.key() == Qt.Key_L:
+            print("Class: LIKELY FeLoBAL QSO.")
+            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'LIKELY']
+        if event.key() == Qt.Key_R:
+            # Reset the plot to the original state
+            self.clear()
+            self.plot_single()   
+        # if the user presses the key combination Ctrl+Left, plot the previous spectrum
+        if event.modifiers() & Qt.ControlModifier:
+            if event.key() == Qt.Key_Left:
+                self.plot_previous()
 
-    def close(self):
-        self.close()
-        self.quit()
+class PGSpecPlotAppFeLo(PGSpecPlotApp):
+    def __init__(self, speclist, SpecClass=SpecSDSS, 
+                 output_file='vifelo_output.csv'):
+        super().__init__(speclist, SpecClass, output_file)
+        self.output_file = output_file
+        self.speclist = speclist
+        self.SpecClass = SpecClass
+        self.plot = PGSpecPlotFeLo(self.speclist, self.SpecClass)
+        self.make_layout()
+        # self.layout.show()
+        self.exec_()
+        self.my_dict = my_dict
+        self.save_dict_todf()
+        self.exit() 
+        sys.exit()    
+    
+    def make_layout(self):
+        layout = pg.LayoutWidget()
+        layout.resize(1200, 800)
+        layout.setWindowTitle("PGSpecPlotFeLo - FeLoBAL Spectra Labeler (v1.0)")
+        if self.plot.counter < len(self.speclist):
+            toplabel = layout.addLabel("Press 'Q' for next spectrum, \t\t 'F' to set class as FeLoBAL QSO, \n\
+'N' to set class as Non-FeLoBAL QSO, \t 'U' to set class as UNKNOWN, \n\
+'L' to set class as LIKELY FeLoBAL QSO, \t 'M' to get mouse position, \t 'Space' to get spectrum value at current wavelength.\n\
+Use mouse scroll to zoom in/out, \t use mouse select to zoom in. \nPress 'R' to reset the plot to the original state. \nPress 'Ctrl+Left' (MacOS: 'Command+Left') to plot the previous spectrum.", row=0, col=0, colspan=2)
+            toplabel.setFont(QFont("Arial", 16))
+            toplabel.setFixedHeight(140)
+            toplabel.setAlignment(Qt.AlignLeft)
+            toplabel.setStyleSheet("background-color: white")
+            toplabel.setFrameStyle(QFrame.Panel | QFrame.Raised)
+            toplabel.setLineWidth(2)
+            toplabel.setMidLineWidth(2)
+            toplabel.setFrameShadow(QFrame.Sunken)
+            toplabel.setMargin(5)
+            toplabel.setIndent(5)
+            toplabel.setWordWrap(True)
+            layout.addWidget(self.plot, row=1, col=0, colspan=2) 
+            self.layout = layout
+            self.layout.show()
 
-
+class PGSpecPlotThreadFeLo(PGSpecPlotThread):
+    def __init__(self, speclist, SpecClass=SpecSDSS, **kwargs):
+        # super().__init__()
+        self.speclist = speclist
+        self.SpecClass = SpecClass
+        # Run the PGSpecPlotApp in a thread
+        self.app = PGSpecPlotAppFeLo(self.speclist, self.SpecClass, **kwargs)
+        # Exit the thread when the app is closed
+        self.app.aboutToQuit.connect(self.exit)
