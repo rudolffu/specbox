@@ -364,7 +364,6 @@ Use mouse scroll to zoom in/out, \t use mouse select to zoom in. \nPress 'R' to 
 
 class PGSpecPlotThreadFeLo(PGSpecPlotThread):
     def __init__(self, speclist, SpecClass=SpecSDSS, **kwargs):
-        # super().__init__()
         self.speclist = speclist
         self.SpecClass = SpecClass
         # Run the PGSpecPlotApp in a thread

@@ -326,7 +326,6 @@ class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
             self.dec = header['dec']        # DEC
         self.plateid = header['PLATEID']
         self.mjd = header['MJD']
-        self.objid = header['SPEC_ID']
         self.fiberid = header['FIBERID']
         self.and_mask = data['AND_MASK']
         self.or_mask = data['OR_MASK']
@@ -342,6 +341,10 @@ class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
                                uncertainty=StdDevUncertainty(self.err))
         self.filename = filename
         self.objname = designation(self.ra, self.dec)
+        try:
+            self.objid = header['SPEC_ID']
+        except:
+            self.objid = self.objname
 
     def write(self, filename, **kwargs):
         self.loglam = np.log10(self.wave.value)
