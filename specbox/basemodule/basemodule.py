@@ -230,7 +230,7 @@ class ConvenientSpecMixin():
     def copy(self):
         return self.__class__(self.wave, self.flux, self.err)
     
-    def to_restframe(self, z, inplace=False):
+    def to_restframe(self, z=None, inplace=False):
         """
         Convert the spectrum to the rest-frame.
         Parameters:
@@ -241,7 +241,8 @@ class ConvenientSpecMixin():
                 If True, the spectrum is converted to the rest-frame in place.
                 If False, only a new Spectrum1D object is created.
         """
-        z = self.redshift
+        if z is None:
+            z = self.redshift
         if hasattr(self, 'spec_rest'):
             warnings.warn('Rest-frame spectrum already exisits. \
                            Spectrum unchanged.', UserWarning)
