@@ -146,6 +146,7 @@ class ConvenientSpecMixin():
         self.spec = Spectrum1D(spectral_axis=self.wave, 
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err)) 
+        self.data = self.data[:,:,idx]
         return self
 
     def flux_conserve_resample(self, wave, inplace=False):
