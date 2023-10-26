@@ -661,8 +661,6 @@ class DoubleSpec():
             self.varb = SpecIRAF(varb)
         if varr is not None:
             self.varr = SpecIRAF(varr)
-#         self.objname = os.path.basename(spb.fname)[0:10]
-#         self.objname = os.path.basename(spb.fname)
         self.objname = spb.objname
         if instr is not None:
             self.writename = self.objname + "_" + str(instr) + "_comb.fits"
@@ -703,8 +701,8 @@ class DoubleSpec():
     def combine1D(self, basepath='./', normalize_left=False, output=None):
         spb = self.spb
         spr = self.spr
-        bwave = spb.wave
-        rwave = spr.wave
+        bwave = spb.wave.value
+        rwave = spr.wave.value
         cpath = basepath+'combined/'
         Path(cpath).mkdir(exist_ok=True)
         new_disp_grid = np.arange(bwave[0], rwave[-1], spb.CD1_1) * u.AA
@@ -725,7 +723,7 @@ class DoubleSpec():
         resampler = LinearInterpolatedResampler(extrapolation_treatment='zero_fill')
         new_spec1 = resampler(spec1, new_disp_grid)
         new_spec2 = resampler(spec2, new_disp_grid)
-        idxleft2 = int((spr.CRVAL1-spb.CRVAL1)/spb.CD1_1)+2
+        idxleft2 = int((spr.wave.value[0]-spb.wave.value[0])/spb.CD1_1)+2
         meanjoin_left = np.mean(new_spec1.flux.value[idxleft2:spb.len])
         meanjoin_right = np.mean(new_spec2.flux.value[idxleft2:spb.len])
         if normalize_left == True:
@@ -768,9 +766,7 @@ class DoubleSpec():
     
         
     def close(self):
-        self.spb.hducopy.close()
         self.spb.hdu.close()
-        self.spr.hducopy.close()
         self.spr.hdu.close()
 
 
