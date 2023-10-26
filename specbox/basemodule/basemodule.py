@@ -663,7 +663,7 @@ class DoubleSpec():
             self.varr = SpecIRAF(varr)
 #         self.objname = os.path.basename(spb.fname)[0:10]
 #         self.objname = os.path.basename(spb.fname)
-        self.objname = fits.getheader(spbfile)['object']
+        self.objname = spb.objname
         if instr is not None:
             self.writename = self.objname + "_" + str(instr) + "_comb.fits"
         else:
@@ -672,8 +672,8 @@ class DoubleSpec():
     def combine(self,output=None):
         spb = self.spb
         spr = self.spr
-        bwave = spb.wave
-        rwave = spr.wave
+        bwave = spb.wave.value
+        rwave = spr.wave.value
         new_disp_grid = np.arange(bwave[0], rwave[-1], spb.CD1_1) * u.AA
         newdata = np.empty([4,1,len(new_disp_grid)])
         for i in range(4):
@@ -685,12 +685,16 @@ class DoubleSpec():
             new_spec1 = resampler(spec1, new_disp_grid)
             new_spec2 = resampler(spec2, new_disp_grid)
             new_spec1.flux.value[spb.len:] = new_spec2.flux.value[spb.len:]
-            idxleft2 = int((spr.CRVAL1-spb.CRVAL1)/spb.CD1_1)+2
+            idxleft2 = int((spr.wave.value[0]-spb.wave.value[0])/spb.CD1_1)+2
             new_spec2.flux.value[:idxleft2] = new_spec1.flux.value[:idxleft2]
             new_spec_lin = (new_spec1 + new_spec2)/2
             newdata[i,0,:] = new_spec_lin.flux
         self.combined_data = newdata
-        combined_hdu = self.spb.hducopy.copy()
+        combined_hdu = self.spb.hdu.copy()
+        combined_hdu[0].header['NAXIS1']=len(new_disp_grid)
+        combined_hdu[0].header['CRVAL1']=new_disp_grid[0].value
+        combined_hdu[0].header['CRPIX1']=1
+        combined_hdu[0].header['CDELT1']=new_disp_grid[1].value-new_disp_grid[0].value
         combined_hdu[0].data = newdata
         self.combined_hdu = combined_hdu
         combined_hdu.writeto(self.writename)
