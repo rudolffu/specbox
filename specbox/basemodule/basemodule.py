@@ -147,6 +147,7 @@ class ConvenientSpecMixin():
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err)) 
         self.data = self.data[:,:,idx]
+        self.hdr['CRVAL1'] = self.wave.value[0]
         return self
 
     def flux_conserve_resample(self, wave, inplace=False):
