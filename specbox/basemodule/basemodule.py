@@ -288,21 +288,23 @@ class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
         filename : str
             Name of the SDSS spectrum file.
     """
-    def __init__(self, filename=None, *args, **kwargs):
+    def __init__(self, filename=None, redshift=None, *args, **kwargs):
         """
         Initialize the SpecSDSS class.
         Parameters:
         ----------
             filename : str
                 Name of the SDSS spectrum file.
+            redshift : float
+                Redshift of the object.
         """
         super().__init__(*args, **kwargs)
         self.wave_unit = u.Angstrom
         self.flux_unit = 1e-17 * u.erg / u.s / u.cm**2 / u.Angstrom
         if filename is not None:
-            self.read(filename, **kwargs)
+            self.read(filename, redshift=redshift, **kwargs)
 
-    def read(self, filename, **kwargs):
+    def read(self, filename, redshift=None, **kwargs):
         """
         Read the SDSS spectrum file.
         Parameters:
@@ -332,12 +334,8 @@ class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
         self.fiberid = header['FIBERID']
         self.and_mask = data['AND_MASK']
         self.or_mask = data['OR_MASK']
-        redshift = kwargs.get('redshift', None)
         if redshift is None:
-            try: 
-                redshift = self.hdu[2].data['Z'][0]
-            except:
-                redshift = header['Z']
+            redshift = self.hdu[2].data['Z'][0] if 'Z' in self.hdu[2].data.columns.names else header['Z']
         self.redshift = redshift
         # self.objname = self.hdr['OBJNAME']
         self.spec = Spectrum1D(spectral_axis=self.wave, flux=self.flux, 
@@ -929,3 +927,24 @@ class NIRSpecS3d():
         spec = Spectrum1D(flux=flux, spectral_axis=wavelength, meta=meta,
                           uncertainty=err, mask=mask) 
         self.spec1d = spec
+        
+
+class SpecCoadd1d(ConvenientSpecMixin, SpecIOMixin):
+    def __init__(self, filename=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.wave_unit = u.Angstrom
+        self.flux_unit = 1e-17 * u.erg / u.s / u.cm**2 / u.Angstrom
+        if filename is not None:
+            self.read(filename, **kwargs)
+
+    def read(self, filename, **kwargs):
+        super().read(filename, **kwargs)
+        header = self.hdr
+        hdu = self.hdu
+        data = hdu[1].data
+        self.loglam = data['loglam']
+        self.wave = 10**data['loglam'] * self.wave_unit
+        self.flux = data['flux'] * self.flux_unit
+        self.err = data['err'] * self.flux_unit
+        self.spec = Spectrum1D(spectral_axis=self.wave, flux=self.flux, 
+                               uncertainty=StdDevUncertainty(self.err))
