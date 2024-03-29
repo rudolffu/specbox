@@ -146,7 +146,7 @@ class ConvenientSpecMixin():
         self.spec = Spectrum1D(spectral_axis=self.wave, 
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err)) 
-        self.data = self.data[:,:,idx]
+        self.trimmed_idx = idx
         self.hdr['CRVAL1'] = self.wave.value[0]
         return self
 
@@ -464,7 +464,15 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
         self.spec = Spectrum1D(spectral_axis=self.wave, 
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
-
+    
+    def trim(self, wave_range):
+        # update self.data with the trimmed data
+        super().trim(wave_range)
+        self.hdr['CRVAL1'] = self.wave.value[0]
+        self.hdr['CRPIX1'] = 1
+        self.hdr['CDELT1'] = self.wave.value[1] - self.wave.value[0]
+        self.data = self.data[:,:,self.trimmed_idx]
+        return self
 
     
 #     def trim_resample(self, wave_range, step, inplace=False):
