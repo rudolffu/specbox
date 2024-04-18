@@ -897,6 +897,9 @@ class SpecCoadd1d(ConvenientSpecMixin, SpecIOMixin):
         new_disp_grid = np.arange(w1, w2, dw) * u.AA
         fluxcon = FluxConservingResampler()
         newspec = fluxcon(self.spec, new_disp_grid)
+        # check if newspec.uncertainty is InverseVariance, if so, convert to StdDevUncertainty
+        if isinstance(newspec.uncertainty, InverseVariance):
+            newspec.uncertainty = StdDevUncertainty(1/np.sqrt(newspec.uncertainty.array))
         if bad_wave_ranges is not None:
             for rng in bad_wave_ranges:
                 idx = np.where(
