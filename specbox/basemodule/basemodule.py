@@ -322,7 +322,12 @@ class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
         self.loglam = data['loglam']
         self.wave = 10**data['loglam'] * self.wave_unit
         self.flux = data['flux'] * self.flux_unit
+        # convert ivar to error and replace 0 with NaN
+        ivar = data['ivar']
+        ivar[ivar == 0] = np.nan
         self.err = data['ivar']**-0.5 * 1e-17
+        # replace np.nan with np.inf
+        self.err[np.isnan(self.err)] = np.inf
         try:
             self.ra = header['plug_ra']          # RA 
             self.dec = header['plug_dec']        # DEC
@@ -906,16 +911,55 @@ class SpecCoadd1d(ConvenientSpecMixin, SpecIOMixin):
                     (new_disp_grid.value >= rng[0]) & (new_disp_grid.value <= rng[1]))
                 newspec.flux.value[idx] = np.nan
         # newtell = fluxcon(self.telluric_spec, new_disp_grid)
-        hdr['CRVAL1'] = w1
-        hdr['CRPIX1'] = 1
-        hdr['CDELT1'] = dw
-        hdr['CD1_1'] = dw
-        hdr['OBJECT'] = hdr['TARGET']
+        multispecdata = fake_multispec_data(
+            (newspec.flux.value, np.zeros_like(newspec.flux.value), 
+             np.zeros_like(newspec.flux.value), newspec.uncertainty.array))
+        sp_hdu = fits.PrimaryHDU(data=multispecdata)
+        hdrcopy = hdr.copy(strip=True)
+        sp_hdu.header.extend(hdrcopy, strip=True, update=True,
+                     update_first=False, useblanks=True, bottom=False)
+        sp_hdr = sp_hdu.header
+        sp_hdr['OBJECT'] = hdr['TARGET']
+        sp_hdr['NAXIS'] = 3
+        sp_hdr['NAXIS1'] = len(newspec.flux.value)
+        sp_hdr['NAXIS2'] = 1
+        sp_hdr['NAXIS3'] = 4
+        sp_hdr['WCSDIM'] = 3
+        sp_hdr['WAT0_001'] = 'system=equispec'
+        sp_hdr['WAT1_001'] = 'wtype=linear label=Pixel'
+        sp_hdr['WAT2_001'] = 'wtype=linear'
+        sp_hdr['CRVAL1'] = w1
+        sp_hdr['CRPIX1'] = 1
+        sp_hdr['CD1_1'] = dw
+        sp_hdr['CD2_2'] = dw
+        sp_hdr['CD3_3'] = dw
+        sp_hdr['LTM1_1'] = 1
+        sp_hdr['LTM2_2'] = 1
+        sp_hdr['LTM3_3'] = 1
+        sp_hdr['WAT3_001'] = 'wtype=linear'
+        sp_hdr['CTYPE1'] = 'PIXEL'
+        sp_hdr['CTYPE2'] = 'LINEAR'
+        sp_hdr['CTYPE3'] = 'LINEAR'
+        sp_hdr['BANDID1'] = 'spectrum - background fit, weights variance, clean no'               
+        sp_hdr['BANDID2'] = 'raw - background fit, weights none, clean no'                        
+        sp_hdr['BANDID3'] = 'background - background fit'                                         
+        sp_hdr['BANDID4'] = 'sigma - background fit, weights variance, clean no'  
         newname = self.basename.strip('.fits') + '_iraf.fits'
-        pyasl.write1dFitsSpec(newname, 
-                              flux=newspec.flux.value, 
-                              wvl=new_disp_grid.value, 
-                              fluxErr=newspec.uncertainty.array,
-                              header=hdr,
-                              clobber=True)
+        sp_hdu.writeto(f'{newname}', overwrite=True)
+        # pyasl.write1dFitsSpec(newname, 
+        #                       flux=newspec.flux.value, 
+        #                       wvl=new_disp_grid.value, 
+        #                       fluxErr=newspec.uncertainty.array,
+        #                       header=hdr,
+        #                       clobber=True)
         
+
+
+def fake_multispec_data(arrlist):
+# https://github.com/jrthorstensen/opextract/blob/master/opextract.py#L337
+   # takes a list of 1-d numpy arrays, which are
+   # to be the 'bands' of a multispec, and stacks them
+   # into the format expected for a multispec.  As of now
+   # there can only be a single 'aperture'.
+
+   return np.expand_dims(np.array(arrlist), 1)
