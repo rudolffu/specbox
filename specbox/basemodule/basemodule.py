@@ -267,12 +267,12 @@ class SpecIOMixin():
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def read(self, filename, **kwargs):
+    def read(self, filename, ext=0, **kwargs):
         self.filename = filename
         self.basename = os.path.basename(filename)
         hdu = fits.open(filename)
-        self.hdr = hdu[0].header
-        self.data = hdu[0].data
+        self.hdr = hdu[ext].header
+        self.data = hdu[ext].data
         self.hdu = hdu
 
     def write(self, filename, **kwargs):
@@ -426,13 +426,13 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
                 dec = coord.dec.value
         self.ra = ra
         self.dec = dec
-        if 'J' in objname:
-            try:
-                name = designation(ra, dec, telescope)
-            except:
-                name = objname
-        else:
-            name = objname
+        # if 'J' in objname:
+        #     try:
+        #         name = designation(ra, dec, telescope)
+        #     except:
+        #         name = objname
+        # else:
+        name = objname
         if side is not None:
             name = name + side
         self.objname = name
@@ -610,7 +610,7 @@ class DoubleSpec():
         else:
             self.writename = self.objname + "_comb.fits"
     
-    def combine(self,output=None):
+    def combine(self, normalize_left=False, output=None, overwrite=True):
         spb = self.spb
         spr = self.spr
         bwave = spb.wave.value
@@ -627,6 +627,11 @@ class DoubleSpec():
             new_spec2 = resampler(spec2, new_disp_grid)
             new_spec1.flux.value[spb.len:] = new_spec2.flux.value[spb.len:]
             idxleft2 = int((spr.wave.value[0]-spb.wave.value[0])/spb.CD1_1)+2
+            meanjoin_left = np.mean(new_spec1.flux.value[idxleft2:spb.len])
+            meanjoin_right = np.mean(new_spec2.flux.value[idxleft2:spb.len])
+            if normalize_left:
+                new_spec1 = new_spec1/meanjoin_left*meanjoin_right
+            new_spec1.flux.value[spb.len:] = new_spec2.flux.value[spb.len:]
             new_spec2.flux.value[:idxleft2] = new_spec1.flux.value[:idxleft2]
             new_spec_lin = (new_spec1 + new_spec2)/2
             newdata[i,0,:] = new_spec_lin.flux
@@ -638,7 +643,7 @@ class DoubleSpec():
         combined_hdu[0].header['CDELT1']=new_disp_grid[1].value-new_disp_grid[0].value
         combined_hdu[0].data = newdata
         self.combined_hdu = combined_hdu
-        combined_hdu.writeto(self.writename)
+        combined_hdu.writeto(self.writename, overwrite=overwrite)
         
         
     def combine1D(self, basepath='./', normalize_left=False, output=None):
@@ -704,71 +709,6 @@ class DoubleSpec():
     def close(self):
         self.spb.hdu.close()
         self.spr.hdu.close()
-
-
-# class SdssSpec(SpecBase):
-#     def __init__(self, fname, redshift=None, perform_rest=False):
-#         hdu = fits.open(fname)
-#         basename = os.path.basename(fname)
-#         self.basename = basename
-#         hdr = hdu[0].header
-#         self.hdr = hdr
-#         self.perform_rest = perform_rest
-#         self.ra=hdr['plug_ra']          # RA 
-#         self.dec=hdr['plug_dec']        # DEC
-#         self.plateid = hdr['plateid']   # SDSS plate ID
-#         self.mjd = hdr['mjd']           # SDSS MJD
-#         self.fiberid = hdr['fiberid']   # SDSS fiber ID
-#         if redshift is None:
-#             try: 
-#                 redshift = hdu[2].data['z']
-#             except:
-#                 print('Redshift not provided.')
-#                 pass
-#         self.redshift = redshift
-#         data = hdu[1].data
-#         hdu.close()
-#         wave = 10**data['loglam'] * u.AA 
-#         flux = data['flux'] * 10**-17 * u.Unit('erg cm-2 s-1 AA-1') 
-#         ivar = pd.Series(data['ivar'])
-#         ivar.replace(0, np.nan, inplace=True)
-#         ivar_safe = ivar.interpolate()
-#         err = 1./np.sqrt(ivar_safe.values) * 10**-17
-#         self.wave = wave
-#         self.loglam = data['loglam']
-#         self.flux = flux
-#         self.err = err    
-#         self.spec = Spectrum1D(spectral_axis=wave, 
-#                                flux=flux, 
-#                                uncertainty=StdDevUncertainty(err))
-#         if perform_rest == True:
-#             self.to_restframe()
-        
-#     def plot_6sigma(self):
-#         plt.figure()
-#         mean = np.nanmean(self.spec.flux.value)
-#         std = np.nanstd(self.spec.flux.value)
-#         above_idx = np.where(abs(self.spec.flux.value)-6*std>0)
-#         below_idx = np.where(abs(self.spec.flux.value)-6*std<0)
-#         plt.step(self.spec.spectral_axis[below_idx], self.spec.flux[below_idx])
-#         plt.step(self.spec.spectral_axis[above_idx], self.spec.flux[above_idx])
-# #         plt.plot(self.spec.spectral_axis, self.spec.flux)
-#         plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
-#         plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
-#         plt.title(self.basename)
-        
-#     def plot_err_sigma(self):
-#         plt.figure()
-#         med = np.nanmedian(self.err)
-#         std = np.nanstd(self.err)
-#         above_idx = np.where(abs(self.err)-6*std>0)
-#         below_idx = np.where(abs(self.err)-6*std<0)
-#         plt.step(self.spec.spectral_axis[below_idx], self.spec.flux[below_idx])
-#         plt.step(self.spec.spectral_axis[above_idx], self.spec.flux[above_idx])
-# #         plt.plot(self.spec.spectral_axis, self.spec.flux)
-#         plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
-#         plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
-#         plt.title(self.basename)
 
 class NIRSpecS3d():
     
@@ -963,3 +903,66 @@ def fake_multispec_data(arrlist):
    # there can only be a single 'aperture'.
 
    return np.expand_dims(np.array(arrlist), 1)
+
+
+class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
+    """
+    Class for reading 1D spectra from Euclid.
+    """
+    def __init__(self, filename=None, ext=None, extname=None, *args, **kwargs):
+        """
+        Parameters:
+        ----------
+            filename : str
+                Name of the file to read.    
+        """
+        super().__init__(*args, **kwargs)
+        self.wave_unit=u.AA
+        self.flux_unit=u.erg/u.s/u.cm**2/u.AA
+        self.wave = None
+        self.flux = None
+        self.err = None
+        self.telescope = 'Euclid'
+        if filename is not None:
+            self.read(filename, ext, extname, **kwargs)
+        
+    def read(self, filename, ext=None, extname=None, **kwargs):
+        """
+        Read the Euclid 1D spectrum.
+        Parameters:
+        ----------
+            filename : str
+                Name of the Euclid spectrum file.
+        """
+        hdul = fits.open(filename)
+        if extname is None and ext is None:
+            print('No extension specified. Reading the first extension.')
+            ext = 1
+            hdu = hdul[ext].copy()
+        elif extname is not None:
+            hdu = hdul[f'{extname}'].copy()
+        elif ext is not None:
+            hdu = hdul[ext].copy()
+        hdul.close()
+        data = hdu.data
+        data = data[11:511]
+        self.hdu = hdu
+        self.data = data
+        self.wave = data['WAVELENGTH'] * u.Angstrom
+        self.flux = data['SIGNAL'] * 1e-16 * u.erg / u.s / u.cm**2 / u.Angstrom
+        variance = data['VAR']
+        self.err = np.sqrt(variance) * 1e-16 
+        self.spec = Spectrum1D(spectral_axis=self.wave, 
+                               flux=self.flux, 
+                               uncertainty=StdDevUncertainty(self.err))
+        self.objname = hdu.name
+        self.objid = hdu.name
+        self.filename = filename
+        self.ext = ext
+        try:
+            self.ra = hdu.header['RA']
+            self.dec = hdu.header['DEC']
+            self.z_ph = hdu.header['Z_PH']
+            self.z_gaia = hdu.header['Z_GAIA']
+        except:
+            pass

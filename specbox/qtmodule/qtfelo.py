@@ -1,6 +1,6 @@
-from PyQt5.QtGui import QCursor, QFont 
-from PyQt5.QtCore import Qt, QThread
-from PyQt5.QtWidgets import QApplication, QFrame, QWidget
+from PySide6.QtGui import QCursor, QFont 
+from PySide6.QtCore import Qt, QThread
+from PySide6.QtWidgets import QApplication, QFrame, QWidget
 import sys
 from ..basemodule import SpecLAMOST
 from ..basemodule import *
