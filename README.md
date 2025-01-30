@@ -7,7 +7,7 @@ A simple tool to manipulate and visualize optical spectra for astronomical resea
 - `scipy`
 - `astropy`
 - [`pyqtgraph`](https://www.pyqtgraph.org/)
-- `pyqt5`
+- [`PySide6`](https://doc.qt.io/qtforpython-6/gettingstarted.html#getting-started)
 - [`specutils`](https://specutils.readthedocs.io/en/stable/installation.html)
 - `matplotlib`
 - `pandas`
