@@ -13,6 +13,7 @@ from astropy.table import Table
 from astropy.io import fits
 from astropy import units as u
 from astropy.coordinates import SkyCoord
+from astropy.stats import sigma_clip
 import pandas as pd
 # locate the data file in the package
 import pkg_resources
@@ -85,15 +86,22 @@ class PGSpecPlot(pg.PlotWidget):
 
     def plot_single(self):
         spec = self.spec
-        # if hasattr(self, 'z_ph'):
-        #     z_ph = self.z_ph
-        # else:
-        z_vi = spec.z_ph
+        if hasattr(spec, 'z_vi'):
+            z_vi = spec.z_vi
+        else:
+            z_vi = spec.z_ph
         z_gaia = spec.z_gaia
         objname = spec.objname
-        self.plot(spec.wave.value, spec.flux.value, pen='b', 
-                  symbol='o', symbolSize=4, symbolPen=None, connect='finite',
-                  symbolBrush='k', antialias=True)
+        flux = np.ma.masked_invalid(spec.flux.value)
+        flux_sigclip = sigma_clip(flux, sigma=10, maxiters=3)
+        wave = spec.wave.value[~flux_sigclip.mask]
+        flux = flux_sigclip.data[~flux_sigclip.mask]
+        err = spec.err[~flux_sigclip.mask]
+        self.plot(wave, flux, pen='b', 
+              symbol='o', symbolSize=4, symbolPen=None, connect='finite',
+              symbolBrush='k', antialias=True)
+        self.wave = wave
+        self.flux = flux
         # try:
         #     idx_poor = np.where(spec.flux.value/spec.err < 2)
         #     line_poor = self.plot(spec.wave.value[idx_poor], spec.flux.value[idx_poor], pen='r', 
@@ -107,12 +115,12 @@ class PGSpecPlot(pg.PlotWidget):
         idx = np.where((wave_temp>=12047.4) & (wave_temp<=18734))
         flux_temp = tb_temp['Flux'].data
         wave_temp = wave_temp[idx]
-        flux_temp = flux_temp[idx] / np.mean(flux_temp[idx])  * spec.flux.value.mean() * 1.5
+        flux_temp = flux_temp[idx] / np.mean(flux_temp[idx])  * np.abs(flux.mean()) * 1.5
         c1 = self.plot(wave_temp, flux_temp, pen=(240,128,128), symbol='+', symbolSize=2, symbolPen=None)
         self.legend = self.addLegend(labelTextSize='16pt')  
         self.text = pg.TextItem(text="{0}  {1}  z_vi = {2:.4f}, z_gaia = {3:.4f}".format(
             self.message, objname, z_vi, z_gaia), anchor=(0,0), color='k', border='w', fill=(255, 255, 255, 200))
-        self.text.setPos(spec.wave.value[0] * 1.3, spec.flux.value.max() * 1.3)
+        self.text.setPos(wave[0] * 1.3, flux.max() * 1.3)
         self.text.setFont(QFont("Arial", 14))
         self.addItem(self.text)
         self.setLabel('left', "Flux", units=spec.flux.unit.to_string())
@@ -130,17 +138,17 @@ class PGSpecPlot(pg.PlotWidget):
         self.spec = spec
         self.initUI()
         # self.slider.setValue(int(self.spec.z_ph * 1000))
-        # if hasattr(self, 'line_poor'):
-        #     try:
-        #         self.legend.removeItem(self.line_poor)
-        #     except:
-        #         pass
+        if hasattr(self, 'line_poor'):
+            try:
+                self.legend.removeItem(self.line_poor)
+            except:
+                pass
         self.plot_single()
         self.counter += 1
 
     def plot_previous(self):
         specfile = self.specfile
-        if self.counter >= 1:
+        if self.counter > 1:
             print("Plotting previous spectrum...")
             self.message = "Spectrum {0}/{1}.".format(self.counter-1, self.len_list)
             print(self.message)
@@ -151,14 +159,14 @@ class PGSpecPlot(pg.PlotWidget):
             self.spec = spec
             self.initUI()
             # self.slider.setValue(int(self.spec.z_ph * 1000))
-            # if hasattr(self, 'line_poor'):
-            #     try:
-            #         self.legend.removeItem(self.line_poor)
-            #     except:
-            #         pass
+            if hasattr(self, 'line_poor'):
+                try:
+                    self.legend.removeItem(self.line_poor)
+                except:
+                    pass
             self.counter -= 1
             self.plot_single()
-        elif self.counter == 0:
+        elif self.counter == 1:
             print("No previous spectrum to plot.")
 
     def keyPressEvent(self, event):
@@ -188,11 +196,12 @@ class PGSpecPlot(pg.PlotWidget):
             mouse_pos = self.mapFromGlobal(QCursor.pos())
             self.vb = self.getViewBox()
             wave = self.vb.mapSceneToView(mouse_pos).x()
-            idx = np.abs(self.spec.wave.value - wave).argmin()
-            wave = self.spec.wave.value[idx]
-            flux = self.spec.flux.value[idx]
+            idx = np.abs(self.wave - wave).argmin()
+            wave = self.wave[idx]
+            flux = self.flux[idx]
             #Add text to the plot at the mouse position
-            self.text = pg.TextItem(text="Wavelength: {0:.2f} Flux: {1:.2f}".format(wave, flux), anchor=(0,0), color='r', border='w', fill=(255, 255, 255, 200))
+            self.text = pg.TextItem(
+                text="Wavelength: {0:.2f} Flux: {1:.2f} x 1e-17".format(wave, flux*1e17), anchor=(0,0), color='r', border='w', fill=(255, 255, 255, 200))
             self.text.setFont(QFont("Arial", 18, QFont.Bold))
             self.text.setPos(wave, flux)
             self.addItem(self.text)
