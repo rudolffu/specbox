@@ -479,39 +479,6 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
         self.data = self.data[:,:,self.trimmed_idx]
         return self
 
-    
-#     def trim_resample(self, wave_range, step, inplace=False):
-#         new_disp_grid = np.arange(wave_range[0], wave_range[1], step) * u.AA
-#         resampler = SplineInterpolatedResampler()
-#         self.trimmed_spec = resampler(self.spec, new_disp_grid) 
-#         if inplace == True:
-#             self.spec = self.trimmed_spec
-#             self._copy_spec_attr()
-
-#     def slice(self, idx1, idx2, inplace=False):
-#         self.trimmed_spec = self.spec[idx1:idx2]
-#         if inplace == True:
-#             self.spec = self.trimmed_spec
-#             self.loglam = self.loglam[idx1:idx2]
-#             self._copy_spec_attr()
-        
-#     def plot(self, fig_num=0):
-#         plt.figure(num=fig_num, figsize=(16, 6))
-#         plt.plot(self.spec.spectral_axis, self.spec.flux, lw=1, c='k')
-#         # plt.plot(self.spec.spectral_axis, self.err)
-#         plt.xlabel(r'Wavelength [$\mathrm{\AA}$]')
-#         plt.ylabel(r'Flux [$\mathrm{erg\;s^{-1}\;cm^{-2}\;\AA^{-1}}$]')
-#         if self.objname is not None:
-#             plt.title(self.objname)
-#         if self.objname is None and self.basename is not None:
-#             plt.title(self.basename)
-# #         plt.show()
-        
-#     def _copy_spec_attr(self):
-#         self.wave = self.spec.spectral_axis
-#         self.flux = self.spec.flux
-#         self.err = self.spec.uncertainty.array
-
 class SpecLAMOST(ConvenientSpecMixin, SpecIOMixin):
     """A class for LAMOST Low Resolution Spectral (LRS) data.
     """
@@ -959,10 +926,19 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.objid = hdu.name
         self.filename = filename
         self.ext = ext
-        try:
+        if 'RA' in hdu.header and 'DEC' in hdu.header:
             self.ra = hdu.header['RA']
             self.dec = hdu.header['DEC']
+        else:
+            self.ra = 0.0
+            self.dec = 0.0
+        if 'Z_PH' in hdu.header:
             self.z_ph = hdu.header['Z_PH']
+        else:
+            self.z_ph = 0.0
+        if 'Z_GAIA' in hdu.header:
             self.z_gaia = hdu.header['Z_GAIA']
-        except:
-            pass
+        else:
+            self.z_gaia = 0.0
+        if 'Z_VI' in hdu.header:
+            self.z_vi = hdu.header['Z_VI']
