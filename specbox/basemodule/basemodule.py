@@ -136,20 +136,51 @@ class ConvenientSpecMixin():
     def _has_uncertainty(self):
         return self.spec.uncertainty is not None
     
-    def trim(self, wave_range):
+    def trim(self, wave_range, plot=True, inplace=False):
+        """
+        Trim the spectrum to a given wavelength range.
+        Parameters:
+        ----------
+            wave_range : tuple
+                The wavelength range to trim the spectrum.
+            plot : bool
+                Plot the trimmed spectrum.
+            inplace : bool
+                If True, the spectrum is trimmed in place.
+                If False, a new Spectrum1D object is created.
+        Returns:
+        -------
+            self (if inplace=True) or trimmed_copy : ConvenientSpecMixin
+                The trimmed spectrum.
+        """
         wave = self.wave.value
         idx = (wave >= wave_range[0]) & (wave <= wave_range[1])
-        self.trimmed = True
-        self.flux = self.flux[idx]
-        self.wave = self.wave[idx]
-        self.err = self.err[idx]
-        self.spec = Spectrum1D(spectral_axis=self.wave, 
-                               flux=self.flux, 
-                               uncertainty=StdDevUncertainty(self.err)) 
-        self.trimmed_idx = idx
-        self.hdr['CRVAL1'] = self.wave.value[0]
-        return self
-
+        flux = self.flux[idx]
+        wave = self.wave[idx]
+        err = self.err[idx]
+        if plot == True:
+            fig, ax = plt.subplots()
+            ax.plot(wave, flux, lw=1, c='k')
+            ax.set_xlabel("Wavelength ({})".format(self.wave.unit))
+            ax.set_ylabel("Flux ({})".format(self.flux.unit))
+        if inplace == True:
+            self.wave = wave
+            self.flux = flux
+            self.err = err
+            self.spec = Spectrum1D(spectral_axis=self.wave, 
+                                   flux=self.flux, 
+                                   uncertainty=StdDevUncertainty(self.err))
+            self.trimmed = True
+            self.trimmed_idx = idx
+            self.hdr['CRVAL1'] = self.wave.value[0]
+            return self
+        else:
+            self.trimmed_copy = self.__class__(
+                wave=wave, flux=flux, err=err)
+            self.trimmed_copy.trimmed = True
+            self.trimmed_copy.trimmed_idx = idx
+            return self.trimmed_copy
+        
     def flux_conserve_resample(self, wave, inplace=False):
         # if not inplace:
         #     return self.copy().flux_conserve_resample(wave, inplace=True)
@@ -470,14 +501,18 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
     
-    def trim(self, wave_range):
+    def trim(self, wave_range, plot=True, inplace=False):
         # update self.data with the trimmed data
-        super().trim(wave_range)
-        self.hdr['CRVAL1'] = self.wave.value[0]
-        self.hdr['CRPIX1'] = 1
-        self.hdr['CDELT1'] = self.wave.value[1] - self.wave.value[0]
-        self.data = self.data[:,:,self.trimmed_idx]
-        return self
+        super().trim(wave_range, plot=plot, inplace=inplace)
+        if inplace == True:
+            self.hdr['CRVAL1'] = self.wave.value[0]
+            self.hdr['CRPIX1'] = 1
+            self.hdr['CDELT1'] = self.wave.value[1] - self.wave.value[0]
+            self.data = self.data[:,:,self.trimmed_idx]
+            return self
+        else:
+            return self.trimmed_copy
+            
 
 class SpecLAMOST(ConvenientSpecMixin, SpecIOMixin):
     """A class for LAMOST Low Resolution Spectral (LRS) data.
