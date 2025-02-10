@@ -521,13 +521,15 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
             self (if inplace=True) or a trimmed copy : SpecIRAF
                 The trimmed spectrum.
         """
-        super().trim(wave_range, plot=plot, inplace=inplace)
+        trimmed_copy = super().trim(wave_range, plot=plot, inplace=inplace)
         if inplace == True:
             self.hdr['CRVAL1'] = self.wave.value[0]
             self.hdr['CRPIX1'] = 1
             self.hdr['CDELT1'] = self.wave.value[1] - self.wave.value[0]
             self.data = self.data[:,:,self.trimmed_idx]
             return self
+        else:
+            return trimmed_copy
             
 
 class SpecLAMOST(ConvenientSpecMixin, SpecIOMixin):
