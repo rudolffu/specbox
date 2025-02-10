@@ -52,6 +52,10 @@ class ConvenientSpecMixin():
         self.wave = wave
         self.flux = flux
         self.err = err
+        if self.wave is not None and self.flux is not None:
+            self.spec = Spectrum1D(spectral_axis=self.wave, 
+                                   flux=self.flux, 
+                                   uncertainty=StdDevUncertainty(self.err))
 
     @property
     def _length(self):
@@ -147,10 +151,10 @@ class ConvenientSpecMixin():
                 Plot the trimmed spectrum.
             inplace : bool
                 If True, the spectrum is trimmed in place.
-                If False, a new Spectrum1D object is created.
+                If False, a new ConvenientSpecMixin object is created.
         Returns:
         -------
-            self (if inplace=True) or trimmed_copy : ConvenientSpecMixin
+            self (if inplace=True) or a trimmed copy : ConvenientSpecMixin
                 The trimmed spectrum.
         """
         wave = self.wave.value
@@ -172,14 +176,10 @@ class ConvenientSpecMixin():
                                    uncertainty=StdDevUncertainty(self.err))
             self.trimmed = True
             self.trimmed_idx = idx
-            self.hdr['CRVAL1'] = self.wave.value[0]
             return self
         else:
-            self.trimmed_copy = self.__class__(
-                wave=wave, flux=flux, err=err)
-            self.trimmed_copy.trimmed = True
-            self.trimmed_copy.trimmed_idx = idx
-            return self.trimmed_copy
+            return self.__class__(wave=wave, flux=flux, err=err,
+                                  wave_unit=self.wave_unit, flux_unit=self.flux_unit)
         
     def flux_conserve_resample(self, wave, inplace=False):
         # if not inplace:
@@ -332,6 +332,9 @@ class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
         super().__init__(*args, **kwargs)
         self.wave_unit = u.Angstrom
         self.flux_unit = 1e-17 * u.erg / u.s / u.cm**2 / u.Angstrom
+        self.wave = kwargs.get('wave', None)
+        self.flux = kwargs.get('flux', None)
+        self.err = kwargs.get('err', None)
         if filename is not None:
             self.read(filename, redshift=redshift, **kwargs)
 
@@ -411,11 +414,11 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
                 Name of the file to read.    
         """
         super().__init__(*args, **kwargs)
-        self.wave_unit=u.AA
-        self.flux_unit=u.erg/u.s/u.cm**2/u.AA
-        self.wave = None
-        self.flux = None
-        self.err = None
+        self.wave_unit=kwargs.get('wave_unit', u.AA)
+        self.flux_unit=kwargs.get('flux_unit', u.erg/u.s/u.cm**2/u.AA)
+        self.wave = kwargs.get('wave', None)
+        self.flux = kwargs.get('flux', None)
+        self.err = kwargs.get('err', None)
         self.telescope = kwargs.get('telescope', None)
         self.side = kwargs.get('side', None)
         if filename is not None:
@@ -502,7 +505,22 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
                                uncertainty=StdDevUncertainty(self.err))
     
     def trim(self, wave_range, plot=True, inplace=False):
-        # update self.data with the trimmed data
+        """
+        Trim the spectrum to a given wavelength range.
+        Parameters:
+        ----------
+            wave_range : tuple
+                The wavelength range to trim the spectrum.
+            plot : bool
+                Plot the trimmed spectrum.
+            inplace : bool
+                If True, the spectrum is trimmed in place.
+                If False, a new SpecIRAF object is created.
+        Returns:
+        -------
+            self (if inplace=True) or a trimmed copy : SpecIRAF
+                The trimmed spectrum.
+        """
         super().trim(wave_range, plot=plot, inplace=inplace)
         if inplace == True:
             self.hdr['CRVAL1'] = self.wave.value[0]
@@ -510,8 +528,6 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
             self.hdr['CDELT1'] = self.wave.value[1] - self.wave.value[0]
             self.data = self.data[:,:,self.trimmed_idx]
             return self
-        else:
-            return self.trimmed_copy
             
 
 class SpecLAMOST(ConvenientSpecMixin, SpecIOMixin):
@@ -921,9 +937,9 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         super().__init__(*args, **kwargs)
         self.wave_unit=u.AA
         self.flux_unit=u.erg/u.s/u.cm**2/u.AA
-        self.wave = None
-        self.flux = None
-        self.err = None
+        self.wave = kwargs.get('wave', None)
+        self.flux = kwargs.get('flux', None)
+        self.err = kwargs.get('err', None)
         self.telescope = 'Euclid'
         if filename is not None:
             self.read(filename, ext, extname, **kwargs)
@@ -977,3 +993,5 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             self.z_gaia = 0.0
         if 'Z_VI' in hdu.header:
             self.z_vi = hdu.header['Z_VI']
+        else:
+            self.z_vi = 0.0
