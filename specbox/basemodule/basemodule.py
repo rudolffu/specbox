@@ -1008,5 +1008,11 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             self.z_gaia = 0.0
         if 'Z_VI' in hdu.header:
             self.z_vi = hdu.header['Z_VI']
-        else:
-            self.z_vi = 0.0
+            
+    @property
+    def z_vi(self):
+        return self._z_vi
+    
+    @z_vi.setter
+    def z_vi(self, value):
+        self._z_vi = value
