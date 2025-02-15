@@ -21,7 +21,8 @@ import pkg_resources
 data_path = pkg_resources.resource_filename('specbox', 'data/')
 
 my_dict = {}
-tb_temp = Table.read(data_path + 'qso_temp_nir_glikman2006_datafile7.txt', format='ascii')
+tb_temp = Table.read(data_path + 'optical_nir_qso_template.fits')
+tb_temp.rename_columns(['wavelength', 'flux'], ['Wave', 'Flux'])
 
 class PGSpecPlot(pg.PlotWidget):
     """
@@ -80,7 +81,7 @@ class PGSpecPlot(pg.PlotWidget):
 
     def update_plot(self, value):
         # Update the redshift value and re-plot
-        self.spec.z_ph = value / 1000.0
+        self.spec.z_vi = value / 1000.0
         self.clear()
         self.plot_single()
 
@@ -89,7 +90,8 @@ class PGSpecPlot(pg.PlotWidget):
         if hasattr(spec, 'z_vi'):
             z_vi = spec.z_vi
         else:
-            z_vi = spec.z_ph
+            spec.z_vi = spec.z_ph
+        z_vi = spec.z_vi
         z_gaia = spec.z_gaia
         objname = spec.objname
         flux = np.ma.masked_invalid(spec.flux.value)
