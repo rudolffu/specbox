@@ -929,12 +929,18 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
     """
     Class for reading 1D spectra from Euclid.
     """
-    def __init__(self, filename=None, ext=None, extname=None, *args, **kwargs):
+    def __init__(self, filename=None, ext=None, extname=None, clip=True, *args, **kwargs):
         """
         Parameters:
         ----------
             filename : str
-                Name of the file to read.    
+                Name of the Euclid spectrum file.
+            ext : int
+                Extension number of the spectrum.
+            extname : str
+                Extension name of the spectrum.
+            clip : bool
+                If True, clip the spectrum to the useful range.  
         """
         super().__init__(*args, **kwargs)
         self.wave_unit=u.AA
@@ -944,15 +950,21 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.err = kwargs.get('err', None)
         self.telescope = 'Euclid'
         if filename is not None:
-            self.read(filename, ext, extname, **kwargs)
+            self.read(filename, ext, extname, clip, **kwargs)
         
-    def read(self, filename, ext=None, extname=None, **kwargs):
+    def read(self, filename, ext=None, extname=None, clip=True, **kwargs):
         """
         Read the Euclid 1D spectrum.
         Parameters:
         ----------
             filename : str
                 Name of the Euclid spectrum file.
+            ext : int
+                Extension number of the spectrum.
+            extname : str
+                Extension name of the spectrum.
+            clip : bool
+                If True, clip the spectrum to the useful range.
         """
         hdul = fits.open(filename)
         if extname is None and ext is None:
@@ -965,7 +977,8 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             hdu = hdul[ext].copy()
         hdul.close()
         data = hdu.data
-        data = data[11:511]
+        if clip:
+            data = data[11:511]
         self.hdu = hdu
         self.data = data
         self.wave = data['WAVELENGTH'] * u.Angstrom
