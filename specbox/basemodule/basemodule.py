@@ -989,7 +989,10 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
         self.objname = hdu.name
-        self.objid = hdu.name
+        try:
+            self.objid = int(hdu.name)
+        except ValueError:
+            self.objid = hdu.name  # fallback if conversion fails
         self.filename = filename
         self.ext = ext
         self.ra = hdu.header.get('RA', 0.0)
