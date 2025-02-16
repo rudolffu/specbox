@@ -992,27 +992,21 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.objid = hdu.name
         self.filename = filename
         self.ext = ext
-        if 'RA' in hdu.header and 'DEC' in hdu.header:
-            self.ra = hdu.header['RA']
-            self.dec = hdu.header['DEC']
-        else:
-            self.ra = 0.0
-            self.dec = 0.0
-        if 'Z_PH' in hdu.header:
-            self.z_ph = hdu.header['Z_PH']
-        else:
-            self.z_ph = 0.0
-        if 'Z_GAIA' in hdu.header:
-            self.z_gaia = hdu.header['Z_GAIA']
-        else:
-            self.z_gaia = 0.0
-        if 'Z_VI' in hdu.header:
-            self.z_vi = hdu.header['Z_VI']
-            
+        self.ra = hdu.header.get('RA', 0.0)
+        self.dec = hdu.header.get('DEC', 0.0)
+        self.z_ph = hdu.header.get('Z_PH', 0.0)
+        self.z_gaia = hdu.header.get('Z_GAIA', 0.0)
+        self.z_vi = hdu.header.get('Z_VI', 0.0)
+        self.z_temp = hdu.header.get('Z_TEMP', None)
+        
+        if self.z_temp is not None and self.z_temp > 0:
+            if abs(self.z_vi - self.z_temp) < 0.01 or self.z_vi == 0:
+                self.z_vi = self.z_temp
+
     @property
     def z_vi(self):
         return self._z_vi
-    
+        
     @z_vi.setter
     def z_vi(self, value):
         self._z_vi = value
