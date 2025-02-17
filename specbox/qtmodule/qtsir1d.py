@@ -21,20 +21,18 @@ import os
 
 data_path = pkg_resources.resource_filename('specbox', 'data/')
 
-my_dict = {}
 tb_temp = Table.read(data_path + 'optical_nir_qso_template.fits')
 tb_temp.rename_columns(['wavelength', 'flux'], ['Wave', 'Flux'])
 
 class PGSpecPlot(pg.PlotWidget):
-    """
-    Plot widget for plotting spectra using pyqtgraph.
-    """
-    def __init__(self, specfile, SpecClass=SpecEuclid1d):
+    def __init__(self, specfile, SpecClass=SpecEuclid1d, initial_counter=0, history_dict=None):
         super().__init__()
         self.specfile = specfile
         with fits.open(specfile) as hdul:
             self.len_list = len(hdul) - 1
         self.SpecClass = SpecClass
+        # Use the provided history dictionary (or an empty one)
+        self.history = history_dict if history_dict is not None else {}
         self.setWindowTitle("Spectrum")
         self.resize(1200, 800)
         self.setBackground('w')
@@ -42,25 +40,23 @@ class PGSpecPlot(pg.PlotWidget):
         self.setMouseEnabled(x=True, y=True)
         self.setLogMode(x=False, y=False)
         self.setAspectLocked(False)
-        # Show auto-range button
         self.enableAutoRange()
         self.vb = self.getViewBox()
-        # Enable Mouse selection for zooming
         self.vb.setMouseMode(self.vb.RectMode)
-        self.z_min = 0.0                # NEW: minimum redshift
-        self.z_max = 5.0                # NEW: maximum redshift (adjust as needed)
-        self.base_z_step = 0.001        # NEW: base step for mapping
+        self.z_min = 0.0                # minimum redshift
+        self.z_max = 5.0                # maximum redshift
+        self.base_z_step = 0.001        # base step for mapping
         self.slider_min = 0
-        self.slider_max = int((1/self.base_z_step)*np.log((1+self.z_max)/(1+self.z_min)))  # NEW: compute slider max
+        self.slider_max = int((1/self.base_z_step) * np.log((1+self.z_max)/(1+self.z_min)))
         self.message = ''
-        self.counter = 0
-
-        # --- Create slider and spin box once ---
+        self.counter = initial_counter  # set counter based on history
+        
+        # Create slider and spin box only once
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setMinimum(self.slider_min)
         self.slider.setMaximum(self.slider_max)
         self.slider.setTickPosition(QSlider.TicksBelow)
-        self.slider.setTickInterval(max(1, int((self.slider_max - self.slider_min)/10)))
+        self.slider.setTickInterval(max(1, int((self.slider_max - self.slider_min) / 10)))
         self.slider.valueChanged.connect(self.slider_changed)
         
         self.redshiftSpin = QDoubleSpinBox()
@@ -70,7 +66,6 @@ class PGSpecPlot(pg.PlotWidget):
         self.redshiftSpin.setSingleStep(0.001)
         self.redshiftSpin.valueChanged.connect(self.spin_changed)
         
-        # Apply any desired style
         self.slider.setStyleSheet("""
             QSlider {
                 background-color: white;
@@ -90,7 +85,7 @@ class PGSpecPlot(pg.PlotWidget):
             }
         """)
         
-        self.plot_next()  # load the first spectrum
+        self.plot_next()  # load the first un-inspected spectrum
         
     def update_slider_and_spin(self):
         # Update slider and spin values based on the current spectrum's z_vi.
@@ -166,24 +161,15 @@ class PGSpecPlot(pg.PlotWidget):
 
     def plot_next(self):
         specfile = self.specfile
-        while self.counter < self.len_list:
-            ext = self.counter + 1
-            temp_spec = self.SpecClass(specfile, ext=ext)
-            if temp_spec.objid in my_dict:
-                self.counter += 1
-                continue
-            else:
-                break
         if self.counter >= self.len_list:
             print("No more spectra to plot.")
             return
-        self.message = "Spectrum {0}/{1}.".format(self.counter+1, self.len_list)
+        self.message = "Spectrum {0}/{1}.".format(self.counter + 1, self.len_list)
         print(self.message)
         self.clear()
-        ext = self.counter + 1
-        spec = self.SpecClass(specfile, ext=ext)
+        spec = self.SpecClass(specfile, ext=self.counter + 1)
         self.spec = spec
-        self.update_slider_and_spin()  # update the controls for the new spectrum
+        self.update_slider_and_spin()  # update controls for new spectrum
         self.plot_single()
         self.counter += 1
 
@@ -205,21 +191,24 @@ class PGSpecPlot(pg.PlotWidget):
     def keyPressEvent(self, event):
         spec = self.spec
         if event.key() == Qt.Key_Q:
-            if spec.objid not in my_dict:
-                my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'QSO(Default)', self.spec.z_vi]
+            # Update history with the current classification (using self.history)
+            if spec.objid not in self.history:
+                self.history[spec.objid] = [spec.objname, spec.ra, spec.dec, 'QSO(Default)', spec.z_vi]
             if self.counter < self.len_list:
                 self.clear()
                 self.plot_next()
             else:
                 print("No more spectra to plot.")
-            if self.counter % 50 == 0:
+            # Every 50 spectra, save a temporary file that includes all history
+            if (self.counter-1) % 50 == 0:
                 print("Saving temp file to csv (n={})...".format(self.counter))
-                df = pd.DataFrame.from_dict(my_dict, orient='index')
-                df.rename(columns={0:'objname', 1:'ra', 2:'dec', 3:'vi_class', 4:'z_vi'}, inplace=True)
-                df['objid'] = df.index.values
-                df.set_index(np.arange(len(df)), inplace=True)
-                df.to_csv('vi_temp_{}.csv'.format(self.counter), 
-                          index=False)
+                temp_filename = f"vi_temp_{self.counter-1}.csv"
+                # Create a DataFrame from the current history
+                df_new = pd.DataFrame.from_dict(self.history, orient='index')
+                df_new.reset_index(inplace=True)
+                df_new.rename(columns={'index': 'objid', 0: 'objname', 1: 'ra', 2: 'dec', 3: 'vi_class', 4: 'z_vi'}, inplace=True)
+                df_new = df_new[['objid', 'objname', 'ra', 'dec', 'vi_class', 'z_vi']]
+                df_new.to_csv(temp_filename, index=False)
         if event.key() == Qt.Key_M:
             mouse_pos = self.mapFromGlobal(QCursor.pos())
             self.vb = self.getViewBox()
@@ -241,19 +230,19 @@ class PGSpecPlot(pg.PlotWidget):
             print("Wavelength: {0:.2f} Flux: {1:.2f}".format(wave, flux))
         if event.key() == Qt.Key_S:
             print("Class: STAR.")
-            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'STAR', 0.0]
+            self.history[spec.objid] = [spec.objname, spec.ra, spec.dec, 'STAR', 0.0]
         if event.key() == Qt.Key_G:
             print("Class: GALAXY.")
-            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'GALAXY', self.spec.z_vi]
+            self.history[spec.objid] = [spec.objname, spec.ra, spec.dec, 'GALAXY', self.spec.z_vi]
         if event.key() == Qt.Key_A:
             print("Class: QSO(AGN).")
-            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'QSO', self.spec.z_vi]
+            self.history[spec.objid] = [spec.objname, spec.ra, spec.dec, 'QSO', self.spec.z_vi]
         if event.key() == Qt.Key_U:
             print("Class: UNKNOWN.")
-            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'UNKNOWN', 0.0]
+            self.history[spec.objid] = [spec.objname, spec.ra, spec.dec, 'UNKNOWN', 0.0]
         if event.key() == Qt.Key_L:
             print("Class: LIKELY/Unusual QSO.")
-            my_dict[spec.objid] = [spec.objname, spec.ra, spec.dec, 'LIKELY', self.spec.z_vi]
+            self.history[spec.objid] = [spec.objname, spec.ra, spec.dec, 'LIKELY', self.spec.z_vi]
         if event.key() == Qt.Key_R:
             # Reset the plot to the original state
             self.clear()
@@ -264,26 +253,29 @@ class PGSpecPlot(pg.PlotWidget):
                 self.plot_previous()
 
 class PGSpecPlotApp(QApplication):
-    def __init__(self, specfile, SpecClass=SpecEuclid1d, 
-                 output_file='vi_output.csv', load_history=False):
+    def __init__(self, specfile, SpecClass=SpecEuclid1d, output_file='vi_output.csv', load_history=False):
         super().__init__(sys.argv)
         self.output_file = output_file
         self.specfile = specfile
         self.SpecClass = SpecClass
-        # NEW: Load history if available
         if load_history and os.path.exists(self.output_file):
             print(f"Loading history from {self.output_file} ...")
             df = pd.read_csv(self.output_file)
+            # Build a history dictionary from the CSV
+            history_dict = {}
             for idx, row in df.iterrows():
-                my_dict[row['objid']] = [row['objname'], row['ra'], row['dec'], row['vi_class'], row['z_vi']]
-        self.plot = PGSpecPlot(self.specfile, self.SpecClass)
+                history_dict[int(row['objid'])] = [row['objname'], row['ra'], row['dec'], row['vi_class'], row['z_vi']]
+            initial_counter = df.shape[0]  # assuming rows are in order
+        else:
+            history_dict = {}
+            initial_counter = 0
+        self.plot = PGSpecPlot(self.specfile, self.SpecClass, initial_counter=initial_counter, history_dict=history_dict)
         self.len_list = self.plot.len_list
         self.make_layout()
+        self.aboutToQuit.connect(self.save_dict_todf)
         self.exec_()
-        self.my_dict = my_dict
-        self.save_dict_todf()
-        self.exit() 
-        sys.exit()    
+        self.exit()
+        sys.exit()
     
     def make_layout(self):
         layout = pg.LayoutWidget()
@@ -309,8 +301,6 @@ class PGSpecPlotApp(QApplication):
             toplabel.setMargin(5)
             toplabel.setIndent(5)
             toplabel.setWordWrap(True)
-            # toplabel = QLabel("Just a test")
-            # layout.addWidget(toplabel, row=0, col=0, colspan=2)
             layout.addWidget(self.plot, row=1, col=0, colspan=2) 
             slider_container = QWidget()
             slider_layout = QHBoxLayout()
@@ -318,7 +308,6 @@ class PGSpecPlotApp(QApplication):
             slider_layout.addWidget(self.plot.redshiftSpin)
             slider_container.setLayout(slider_layout)
             layout.addWidget(slider_container, row=2, col=0, colspan=2)
-
             self.layout = layout
             self.layout.show()
 
@@ -338,12 +327,13 @@ class PGSpecPlotApp(QApplication):
         self.plot.mousePressEvent(event)
     
     def save_dict_todf(self):
-        self.my_dict = my_dict
-        df = pd.DataFrame.from_dict(self.my_dict, orient='index')
-        df.reset_index(inplace=True)  # preserve original keys in a column named "index"
-        df.rename(columns={'index':'objid', 0:'objname', 1:'ra', 2:'dec', 3:'vi_class', 4:'z_vi'}, inplace=True)
-        df.to_csv(self.output_file, index=False)
-
+        # Merge history from PGSpecPlot with any new entries and save
+        df_new = pd.DataFrame.from_dict(self.plot.history, orient='index')
+        df_new.reset_index(inplace=True)
+        df_new.rename(columns={'index': 'objid', 0: 'objname', 1: 'ra', 2: 'dec', 3: 'vi_class', 4: 'z_vi'}, inplace=True)
+        df_new = df_new[['objid', 'objname', 'ra', 'dec', 'vi_class', 'z_vi']]
+        # Save the merged history
+        df_new.to_csv(self.output_file, index=False)
 
 class PGSpecPlotThread(QThread):
     def __init__(self, specfile, SpecClass=SpecEuclid1d, **kwargs):
