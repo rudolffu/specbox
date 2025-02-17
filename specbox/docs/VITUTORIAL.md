@@ -36,7 +36,7 @@ pip install PySide6 pyqtgraph matplotlib numpy pandas astropy specutils
 ```
 
 - **Project Structure:**  
-  The tool is part of a package (e.g., `specbox`) that contains:
+  The tool is part of a package (`specbox`) that contains:
   - `qtmodule/qtsir1d.py` – Main GUI code.
   - `basemodule.py` – Contains classes (such as `SpecEuclid1d`) to read the FITS spectra.
   - A `data/` folder with template files.
@@ -52,9 +52,9 @@ from specbox.basemodule import SpecEuclid1d
 from specbox.qtmodule.qtsir1d import PGSpecPlotThread
 
 a = PGSpecPlotThread(
-    specfile='../R90_EDFN_EDFS_Q1SPEC_V1.fits',
+    specfile='../COMBINED_SPECS.fits',
     SpecClass=SpecEuclid1d,
-    output_file='vi_euclid_wise_ns_fu.csv',
+    output_file='vi_results.csv',
     load_history=True
 )
 a.run()
@@ -101,7 +101,7 @@ This mapping allows the step size to increase with redshift, matching the natura
 When the tool is active, use the following keys:
 
 - **Q:**  
-  Marks the current spectrum with a default classification (e.g., QSO(Default)) and loads the next spectrum.
+  Loads the next spectrum. If only **Q** is pressed, the default classification **QSO(Default)** will be adopted. If the user chooses other classifications (keys below), using **Q** is also needed to load the next spectrum. 
   
 - **S:**  
   Classifies the spectrum as **STAR** (sets redshift to 0).
@@ -155,17 +155,3 @@ When the tool is active, use the following keys:
 
 - **Customization:**  
   You can modify parameters such as `z_max` and `base_z_step` in the code if your spectral redshift range differs.
-
----
-
-## Troubleshooting
-
-- **Spectrum Not Skipping:**  
-  Ensure that the object IDs in your FITS headers match those saved in the CSV file. The tool expects a numeric ID (e.g., `-670671196480781586`). If necessary, update the code to convert the ID (as shown in the repository).
-
-- **UI Controls Not Syncing:**  
-  If the slider and spin box do not update together, confirm that they are created only once (in the constructor) and updated via the `update_slider_and_spin()` method.
-
----
-
-By following this guide, you and your colleagues should be able to install, run, and efficiently use the visual inspection tool for quasar spectra. Enjoy exploring your data!
