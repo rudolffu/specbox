@@ -6,17 +6,16 @@ This repository provides a visual inspection tool for quasar spectra. The tool e
 
 ## Table of Contents
 
-- [Prerequisites and Installation](#prerequisites-and-installation)
+- [Prerequisites and Installation of specbox](#prerequisites-and-installation-of-specbox)
 - [Running the Tool](#running-the-tool)
 - [User Interface Overview](#user-interface-overview)
 - [Keyboard Shortcuts and Actions](#keyboard-shortcuts-and-actions)
 - [History and Resuming Inspections](#history-and-resuming-inspections)
 - [Tips for Effective Use](#tips-for-effective-use)
-- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Prerequisites and Installation
+## Prerequisites and Installation of `specbox`
 
 - **Python Version:** Python 3  
 - **Dependencies:**  
@@ -29,17 +28,32 @@ This repository provides a visual inspection tool for quasar spectra. The tool e
   - astropy
   - specutils
 
-Install them via pip if necessary:
+Anaconda includes `matplotlib`, `numpy`, `pandas`, and `astropy` by default. `PySide6`, `pyqtgraph`, `specutils` can be installed using `conda`:
 
 ```bash
-pip install PySide6 pyqtgraph matplotlib numpy pandas astropy specutils
+conda install -c conda-forge pyqtgraph pyside6 specutils # or install them individually
+```
+
+In case `conda` does not provide a valid solution for any of the packages, you can install them using `pip`:
+
+```bash
+pip install PySide6 specutils pyqtgraph # install only the missing package(s)
+```
+
+- **Installation:**  
+
+To install `specbox`, clone the repository and run the following command in the terminal:
+
+```bash
+git clone https://github.com/rudolffu/specbox.git
+cd specbox
+python -m pip install .
 ```
 
 - **Project Structure:**  
-  The tool is part of a package (`specbox`) that contains:
+  The visual inspection tool is part of the package `specbox` which contains:
   - `qtmodule/qtsir1d.py` – Main GUI code.
   - `basemodule.py` – Contains classes (such as `SpecEuclid1d`) to read the FITS spectra.
-  - A `data/` folder with template files.
 
 ---
 
