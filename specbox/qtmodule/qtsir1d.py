@@ -23,6 +23,7 @@ data_path = pkg_resources.resource_filename('specbox', 'data/')
 
 tb_temp = Table.read(data_path + 'optical_nir_qso_template.fits')
 tb_temp.rename_columns(['wavelength', 'flux'], ['Wave', 'Flux'])
+viewer_version = '1.1'
 
 class PGSpecPlot(pg.PlotWidget):
     def __init__(self, specfile, SpecClass=SpecEuclid1d, initial_counter=0, z_max=5.0, history_dict=None):
@@ -283,7 +284,7 @@ class PGSpecPlotApp(QApplication):
     def make_layout(self):
         layout = pg.LayoutWidget()
         layout.resize(1200, 800)
-        layout.setWindowTitle("PGSpecPlot - Euclid Spectra Viewer (v1.0)")
+        layout.setWindowTitle(f"PGSpecPlot - Euclid Spectra Viewer (v{viewer_version})")
         if self.plot.counter < self.len_list + 1:
             toplabel = layout.addLabel(
                 f"Press 'Q' for next spectrum, \t press no key or 'A' to set class as QSO(AGN),\n"
