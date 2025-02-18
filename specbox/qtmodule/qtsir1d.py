@@ -25,7 +25,7 @@ tb_temp = Table.read(data_path + 'optical_nir_qso_template.fits')
 tb_temp.rename_columns(['wavelength', 'flux'], ['Wave', 'Flux'])
 
 class PGSpecPlot(pg.PlotWidget):
-    def __init__(self, specfile, SpecClass=SpecEuclid1d, initial_counter=0, history_dict=None):
+    def __init__(self, specfile, SpecClass=SpecEuclid1d, initial_counter=0, z_max=5.0, history_dict=None):
         super().__init__()
         self.specfile = specfile
         with fits.open(specfile) as hdul:
@@ -44,7 +44,7 @@ class PGSpecPlot(pg.PlotWidget):
         self.vb = self.getViewBox()
         self.vb.setMouseMode(self.vb.RectMode)
         self.z_min = 0.0                # minimum redshift
-        self.z_max = 5.0                # maximum redshift
+        self.z_max = z_max                # maximum redshift
         self.base_z_step = 0.001        # base step for mapping
         self.slider_min = 0
         self.slider_max = int((1/self.base_z_step) * np.log((1+self.z_max)/(1+self.z_min)))
@@ -169,20 +169,19 @@ class PGSpecPlot(pg.PlotWidget):
         self.clear()
         spec = self.SpecClass(specfile, ext=self.counter + 1)
         self.spec = spec
-        self.update_slider_and_spin()  # update controls for new spectrum
+        self.update_slider_and_spin()  
         self.plot_single()
         self.counter += 1
 
     def plot_previous(self):
         specfile = self.specfile
         if self.counter > 1:
-            # Decrement counter and load the previous spectrum
-            self.counter -= 1
-            ext = self.counter
-            spec = self.SpecClass(specfile, ext=ext)
-            self.spec = spec
+            self.message = "Spectrum {0}/{1}.".format(self.counter-1, self.len_list)
+            print(self.message)
             self.clear()
-            # Update the slider and spin box values for the new spectrum
+            spec = self.SpecClass(specfile, ext=self.counter - 1)
+            self.spec = spec
+            self.counter -= 1
             self.update_slider_and_spin()
             self.plot_single()
         else:
@@ -253,7 +252,7 @@ class PGSpecPlot(pg.PlotWidget):
                 self.plot_previous()
 
 class PGSpecPlotApp(QApplication):
-    def __init__(self, specfile, SpecClass=SpecEuclid1d, output_file='vi_output.csv', load_history=False):
+    def __init__(self, specfile, SpecClass=SpecEuclid1d, output_file='vi_output.csv', z_max=5.0, load_history=False):
         super().__init__(sys.argv)
         self.output_file = output_file
         self.specfile = specfile
@@ -269,7 +268,11 @@ class PGSpecPlotApp(QApplication):
         else:
             history_dict = {}
             initial_counter = 0
-        self.plot = PGSpecPlot(self.specfile, self.SpecClass, initial_counter=initial_counter, history_dict=history_dict)
+        self.plot = PGSpecPlot(
+            self.specfile, self.SpecClass, 
+            initial_counter=initial_counter, 
+            z_max=z_max,
+            history_dict=history_dict)
         self.len_list = self.plot.len_list
         self.make_layout()
         self.aboutToQuit.connect(self.save_dict_todf)
