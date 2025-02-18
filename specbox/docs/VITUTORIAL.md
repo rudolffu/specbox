@@ -28,14 +28,16 @@ This repository provides a visual inspection tool for quasar spectra. The tool e
   - astropy
   - specutils
 
-Anaconda includes `matplotlib`, `numpy`, `pandas`, and `astropy` by default. `PySide6`, `pyqtgraph`, `specutils` can be installed using `conda`:
+You can create a new environment (e.g. `euclid`) and install the required packages using `conda`:
 
 ```bash
-conda install -c conda-forge pyqtgraph pyside6 specutils # or install them individually
+conda create -n euclid pyqtgraph pyside6 specutils astropy -c conda-forge
+conda activate euclid
 ```
 
-In case `conda` does not provide a valid solution for any of the packages, you can install them using `pip`:
+Using the command above, `pandas`, `matplotlib`, and `numpy` will be installed automatically. 
 
+Alternatively, you can install the packages using `pip`:
 ```bash
 pip install PySide6 specutils pyqtgraph # install only the missing package(s)
 ```
@@ -59,29 +61,53 @@ python -m pip install .
 
 ## Running the Tool
 
-You can run the tool by creating an instance of the inspection thread. For example, from a Python shell or script:
+### Test installation of `specbox`
+
+To test the installation, you can run the following code snippet in a Python shell or script:
 
 ```python
 from specbox.basemodule import SpecEuclid1d
+
+sp1 = SpecEuclid1d('COMBINED_SPECS.fits', ext=1) # example path to the FITS file containing the spectra, and the extension number
+
+sp1.plot()
+```
+
+If the installation is successful, you should see a plot of the spectrum.
+
+### Running the Visual Inspection Tool
+
+You can run the tool by creating an instance of the inspection thread. For example, create a Python script (`my_vi_script.py`) with the following code:
+
+```python
+#!/usr/bin/env python
 from specbox.qtmodule.qtsir1d import PGSpecPlotThread
 
 a = PGSpecPlotThread(
-    specfile='../COMBINED_SPECS.fits',
-    SpecClass=SpecEuclid1d,
-    output_file='vi_results.csv',
+    specfile='COMBINED_SPECS.fits', # example path to the FITS file containing the spectra
+    output_file='vi_results.csv', # path to the output CSV file
+    z_max=5.0,
     load_history=True
 )
 a.run()
 ```
 
+Run the script in a terminal (ensure that the correct environment is activated):
+
+```bash
+python my_vi_script.py
+```
+
+The first time you run the tool in a new Python environment, `matplotlib` will take some time to build the font cache. Subsequent runs will be faster.
+
 ### Parameter Explanation
 
 - **specfile:**  
   The path to the FITS file containing the spectra.
-- **SpecClass:**  
-  The class used to read and process each spectrum (e.g., `SpecEuclid1d`).
 - **output_file:**  
   The CSV file where inspection results (object classification and redshift) are saved.
+- **z_max:**
+  The maximum redshift to be considered for the slider. The default is 5.0.
 - **load_history:**  
   If set to `True` and the CSV exists, the tool loads previous classifications and skips those spectra.
 
@@ -168,4 +194,4 @@ When the tool is active, use the following keys:
   Check the CSV file if you need to confirm that classifications are being saved correctly and that object IDs match.
 
 - **Customization:**  
-  You can modify parameters such as `z_max` and `base_z_step` in the code if your spectral redshift range differs.
+  You can modify parameter `z_max` in the script if your spectral redshift range differs.
