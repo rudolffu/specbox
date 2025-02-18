@@ -6,7 +6,6 @@ from glob import glob
 import re
 import matplotlib.pyplot as plt
 import os
-from PyAstronomy import pyasl
 from scipy.signal import savgol_filter
 from pathlib import Path
 from astropy.nddata import StdDevUncertainty,VarianceUncertainty,InverseVariance
@@ -665,67 +664,6 @@ class DoubleSpec():
         self.combined_hdu = combined_hdu
         combined_hdu.writeto(self.writename, overwrite=overwrite)
         
-        
-    def combine1D(self, basepath='./', normalize_left=False, output=None):
-        spb = self.spb
-        spr = self.spr
-        bwave = spb.wave.value
-        rwave = spr.wave.value
-        cpath = basepath+'combined/'
-        Path(cpath).mkdir(exist_ok=True)
-        new_disp_grid = np.arange(bwave[0], rwave[-1], spb.CD1_1) * u.AA
-        if self.varb:
-            spec1 = Spectrum1D(spectral_axis=bwave*u.AA, 
-                               flux=spb.data* u.Unit('erg cm-2 s-1 AA-1'),
-                               uncertainty=StdDevUncertainty(np.sqrt(self.varb.data))) 
-        else:
-            spec1 = Spectrum1D(spectral_axis=bwave*u.AA, 
-                               flux=spb.data* u.Unit('erg cm-2 s-1 AA-1')) 
-        if self.varr:
-            spec2 = Spectrum1D(spectral_axis=rwave*u.AA, 
-                               flux=spr.data* u.Unit('erg cm-2 s-1 AA-1'),
-                               uncertainty=StdDevUncertainty(np.sqrt(self.varr.data)))
-        else:
-            spec2 = Spectrum1D(spectral_axis=rwave*u.AA, 
-                               flux=spr.data* u.Unit('erg cm-2 s-1 AA-1'))           
-        resampler = LinearInterpolatedResampler(extrapolation_treatment='zero_fill')
-        new_spec1 = resampler(spec1, new_disp_grid)
-        new_spec2 = resampler(spec2, new_disp_grid)
-        idxleft2 = int((spr.wave.value[0]-spb.wave.value[0])/spb.CD1_1)+2
-        meanjoin_left = np.mean(new_spec1.flux.value[idxleft2:spb.len])
-        meanjoin_right = np.mean(new_spec2.flux.value[idxleft2:spb.len])
-        if normalize_left == True:
-            new_spec1 = new_spec1/meanjoin_left*meanjoin_right
-        new_spec1.flux.value[spb.len:] = new_spec2.flux.value[spb.len:]
-        new_spec2.flux.value[:idxleft2] = new_spec1.flux.value[:idxleft2]
-        try:
-            new_spec1.uncertainty.array[spb.len:] = new_spec2.uncertainty.array[spb.len:]
-            new_spec2.uncertainty.array[:idxleft2] = new_spec1.uncertainty.array[:idxleft2]
-        except:
-            pass
-        new_spec_lin = (new_spec1 + new_spec2)/2
-        self.new_spec_lin = new_spec_lin
-#         new_spec_lin.write(self.writename, format="myfits-writer")
-        wvl = new_spec_lin.spectral_axis.value
-        flux = new_spec_lin.flux.value
-        try:
-            uncert = new_spec_lin.uncertainty.array
-            self.fluxerr = new_spec_lin.uncertainty.array
-        except:
-            pass
-        # Write spectrum providing wavelength array
-        if uncert.any():
-            fluxerr= uncert
-        else:
-            fluxerr=None
-        pyasl.write1dFitsSpec(cpath+self.writename, 
-                              flux, 
-                              wvl=wvl, 
-                              clobber=True,
-                              fluxErr=fluxerr,
-                              refFileName=self.spbfile)
-    
-        
     def close(self):
         self.spb.hdu.close()
         self.spr.hdu.close()
@@ -906,12 +844,6 @@ class SpecCoadd1d(ConvenientSpecMixin, SpecIOMixin):
         sp_hdr['BANDID4'] = 'sigma - background fit, weights variance, clean no'  
         newname = self.basename.strip('.fits') + '_iraf.fits'
         sp_hdu.writeto(f'{newname}', overwrite=True)
-        # pyasl.write1dFitsSpec(newname, 
-        #                       flux=newspec.flux.value, 
-        #                       wvl=new_disp_grid.value, 
-        #                       fluxErr=newspec.uncertainty.array,
-        #                       header=hdr,
-        #                       clobber=True)
         
 
 
