@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="specbox",
-    version="0.1.0-alpha",
+    version="0.1.0-beta",
     author="Yuming Fu",
     author_email="fuympku@outlook.com",
     description="specbox - A simple tool to manipulate and visualize optical spectra for astronomical research.",
