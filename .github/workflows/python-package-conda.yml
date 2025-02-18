@@ -20,7 +20,7 @@ jobs:
         echo $CONDA/bin >> $GITHUB_PATH
     - name: Install dependencies
       run: |
-        conda create --name base pyqtgraph pyside6 specutils astropy -c conda-forge 
+        conda update pyqtgraph pyside6 specutils astropy -c conda-forge 
     - name: Lint with flake8
       run: |
         conda install flake8
