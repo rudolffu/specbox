@@ -31,8 +31,10 @@ class PGSpecPlot(pg.PlotWidget):
         self.specfile = specfile
         with fits.open(specfile) as hdul:
             self.len_list = len(hdul) - 1
+        if initial_counter >= self.len_list:
+            print("No more spectra to plot.\n\t Plotting the first spectrum.")
+            initial_counter = 0
         self.SpecClass = SpecClass
-        # Use the provided history dictionary (or an empty one)
         self.history = history_dict if history_dict is not None else {}
         self.setWindowTitle("Spectrum")
         self.resize(1200, 800)
@@ -120,7 +122,10 @@ class PGSpecPlot(pg.PlotWidget):
 
     def plot_single(self):
         spec = self.spec
-        if spec.z_vi == 0 and spec.z_ph > 0:
+        # If history contains a saved z_vi for this spectrum, use it.
+        if spec.objid in self.history:
+            spec.z_vi = self.history[spec.objid][4]
+        elif spec.z_vi == 0 and spec.z_ph > 0:
             spec.z_vi = spec.z_ph
         z_vi = spec.z_vi
         z_gaia = spec.z_gaia
