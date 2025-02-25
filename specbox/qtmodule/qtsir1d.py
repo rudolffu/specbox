@@ -23,7 +23,7 @@ data_path = pkg_resources.resource_filename('specbox', 'data/')
 
 tb_temp = Table.read(data_path + 'optical_nir_qso_template.fits')
 tb_temp.rename_columns(['wavelength', 'flux'], ['Wave', 'Flux'])
-viewer_version = '1.1'
+viewer_version = '1.2'
 
 class PGSpecPlot(pg.PlotWidget):
     def __init__(self, specfile, SpecClass=SpecEuclid1d, initial_counter=0, z_max=5.0, history_dict=None):
