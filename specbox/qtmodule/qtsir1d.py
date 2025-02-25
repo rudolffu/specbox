@@ -23,7 +23,7 @@ data_path = pkg_resources.resource_filename('specbox', 'data/')
 
 tb_temp = Table.read(data_path + 'optical_nir_qso_template.fits')
 tb_temp.rename_columns(['wavelength', 'flux'], ['Wave', 'Flux'])
-viewer_version = '1.1'
+viewer_version = '1.2'
 
 class PGSpecPlot(pg.PlotWidget):
     def __init__(self, specfile, SpecClass=SpecEuclid1d, initial_counter=0, z_max=5.0, history_dict=None):
@@ -31,8 +31,10 @@ class PGSpecPlot(pg.PlotWidget):
         self.specfile = specfile
         with fits.open(specfile) as hdul:
             self.len_list = len(hdul) - 1
+        if initial_counter >= self.len_list:
+            print("No more spectra to plot.\n\t Plotting the first spectrum.")
+            initial_counter = 0
         self.SpecClass = SpecClass
-        # Use the provided history dictionary (or an empty one)
         self.history = history_dict if history_dict is not None else {}
         self.setWindowTitle("Spectrum")
         self.resize(1200, 800)
@@ -120,6 +122,7 @@ class PGSpecPlot(pg.PlotWidget):
 
     def plot_single(self):
         spec = self.spec
+        # If history contains a saved z_vi for this spectrum, use it.
         if spec.z_vi == 0 and spec.z_ph > 0:
             spec.z_vi = spec.z_ph
         z_vi = spec.z_vi
@@ -170,6 +173,8 @@ class PGSpecPlot(pg.PlotWidget):
         self.clear()
         spec = self.SpecClass(specfile, ext=self.counter + 1)
         self.spec = spec
+        if spec.objid in self.history:
+            spec.z_vi = self.history[spec.objid][4]
         self.update_slider_and_spin()  
         self.plot_single()
         self.counter += 1
@@ -182,6 +187,8 @@ class PGSpecPlot(pg.PlotWidget):
             self.clear()
             spec = self.SpecClass(specfile, ext=self.counter - 1)
             self.spec = spec
+            if spec.objid in self.history:
+                spec.z_vi = self.history[spec.objid][4]
             self.counter -= 1
             self.update_slider_and_spin()
             self.plot_single()
@@ -244,13 +251,18 @@ class PGSpecPlot(pg.PlotWidget):
             print("Class: LIKELY/Unusual QSO.")
             self.history[spec.objid] = [spec.objname, spec.ra, spec.dec, 'LIKELY', self.spec.z_vi]
         if event.key() == Qt.Key_R:
-            # Reset the plot to the original state
             self.clear()
             self.plot_single()   
-        # if the user presses the key combination Ctrl+Left, plot the previous spectrum
         if event.modifiers() & Qt.ControlModifier:
-            if event.key() == Qt.Key_Left:
-                self.plot_previous()
+            if event.key() == Qt.Key_R:
+                self.clear()
+                self.spec = self.SpecClass(self.specfile, ext=self.counter)
+                self.update_slider_and_spin()
+                self.plot_single() 
+        if event.key() == Qt.Key_Left:
+            self.plot_previous()
+        if event.key() == Qt.Key_Right:
+            self.plot_next()
 
 class PGSpecPlotApp(QApplication):
     def __init__(self, specfile, SpecClass=SpecEuclid1d, output_file='vi_output.csv', z_max=5.0, load_history=False):
@@ -288,12 +300,13 @@ class PGSpecPlotApp(QApplication):
         if self.plot.counter < self.len_list + 1:
             toplabel = layout.addLabel(
                 f"Press 'Q' for next spectrum, \t press no key or 'A' to set class as QSO(AGN),\n"
-                f"'S' to set class as STAR, \t\t 'G' to set class as GALAXY,\n"
-                f"'U' to set class as UNKNOWN, \t 'L' to set class as LIKELY/Unusual QSO,\n"
+                f"'U' to set class as UNKNOWN,\t 'L' for LIKELY/Unusual QSO,\t 'S' for STAR, and 'G' for GALAXY,\n"
                 f"'M' to get mouse position, \t\t 'Space' to get spectrum value at current wavelength.\n"
-                f"Use mouse scroll to zoom in/out, \t use mouse select to zoom in. \t" 
-                f"Press 'R' to reset the plot to the original state.\n"
-                f"Press 'Ctrl+Left' (MacOS: 'Command+Left') to plot the previous spectrum.", row=0, col=0, colspan=2)
+                f"Use mouse scroll to zoom in/out,\t use mouse select to zoom in.\n" 
+                f"Press 'R' to reset the zoom scale.\t"
+                f"Press 'Ctrl+R' to reset the plot with the initial z_vi.\n"
+                f"Press 'Left' to plot the previous spectrum,\t press 'Right' to plot the next spectrum.\n", 
+                row=0, col=0, colspan=2)
             toplabel.setFont(QFont("Arial", 16))
             toplabel.setFixedHeight(140)
             toplabel.setAlignment(Qt.AlignLeft)
