@@ -66,11 +66,13 @@ python -m pip install .
 To test the installation, you can run the following code snippet in a Python shell or script:
 
 ```python
+import matplotlib.pyplot as plt
 from specbox.basemodule import SpecEuclid1d
 
 sp1 = SpecEuclid1d('COMBINED_SPECS.fits', ext=1) # example path to the FITS file containing the spectra, and the extension number
 
 sp1.plot()
+plt.show()
 ```
 
 If the installation is successful, you should see a plot of the spectrum.
@@ -165,10 +167,16 @@ When the tool is active, use the following keys:
   Prints the wavelength and flux at the mouse location and annotates the plot.
 
 - **R:**  
-  Resets the plot to its original state (undo zooming/panning).
+  Resets the plot to its original state (undo zooming/panning). 
 
-- **Ctrl+Left Arrow:**  
-  Loads the previous spectrum for re-inspection.
+- **Ctrl+R:** 
+  Resets the redshift (`z_vi`) to the original value in the current plot.
+
+- **Left Arrow:**  
+  Loads the previous spectrum (useful for reviewing).
+
+- **Right Arrow:**
+  Loads the next spectrum. Only for reviewing because this action does not save the classification and redshift of the current spectrum.
 
 ---
 
