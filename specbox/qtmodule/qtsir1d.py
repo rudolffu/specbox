@@ -1,6 +1,6 @@
 from PySide6.QtGui import QCursor, QFont 
 from PySide6.QtCore import Qt, QThread
-from PySide6.QtWidgets import QApplication, QFrame, QWidget, QSlider, QVBoxLayout, QHBoxLayout, QLabel, QSpacerItem, QLayout, QSizePolicy, QDoubleSpinBox
+from PySide6.QtWidgets import QApplication, QFrame, QWidget, QSlider, QVBoxLayout, QHBoxLayout, QLabel, QSpacerItem, QLayout, QSizePolicy, QDoubleSpinBox, QMessageBox
 import sys
 from ..basemodule import *
 import pyqtgraph as pg
@@ -138,15 +138,6 @@ class PGSpecPlot(pg.PlotWidget):
               symbolBrush='k', antialias=True)
         self.wave = wave
         self.flux = flux
-        # try:
-        #     idx_poor = np.where(spec.flux.value/spec.err < 2)
-        #     line_poor = self.plot(spec.wave.value[idx_poor], spec.flux.value[idx_poor], pen='r', 
-        #                           symbol='x', symbolSize=4, symbolPen=None, connect='finite',
-        #                           symbolBrush=(200,0,0,80), antialias=True, name='SNR lower than 2')
-        #     self.line_poor = line_poor
-        # except:
-        #     pass
-        
         wave_temp = tb_temp['Wave'].data * (1+z_vi)
         idx = np.where((wave_temp>=12047.4) & (wave_temp<=18734))
         flux_temp = tb_temp['Flux'].data
@@ -255,10 +246,26 @@ class PGSpecPlot(pg.PlotWidget):
             self.plot_single()   
         if event.modifiers() & Qt.ControlModifier:
             if event.key() == Qt.Key_R:
+                # Reset the plot with the initial z_vi
                 self.clear()
                 self.spec = self.SpecClass(self.specfile, ext=self.counter)
                 self.update_slider_and_spin()
                 self.plot_single() 
+            if event.key() == Qt.Key_Right:
+                # Plot the last spectrum
+                self.clear()
+                self.counter = self.len_list - 1
+                self.plot_next()
+            if event.key() == Qt.Key_Left:
+                # Plot the first spectrum
+                self.clear()
+                self.counter = 2
+                self.plot_previous()  
+            if event.key() == Qt.Key_B:
+                # Plot the last labeled spectrum
+                self.clear()
+                self.counter = len(self.history) - 1
+                self.plot_next()
         if event.key() == Qt.Key_Left:
             self.plot_previous()
         if event.key() == Qt.Key_Right:
@@ -289,9 +296,6 @@ class PGSpecPlotApp(QApplication):
         self.len_list = self.plot.len_list
         self.make_layout()
         self.aboutToQuit.connect(self.save_dict_todf)
-        self.exec_()
-        self.exit()
-        sys.exit()
     
     def make_layout(self):
         layout = pg.LayoutWidget()
@@ -329,16 +333,7 @@ class PGSpecPlotApp(QApplication):
             self.layout.show()
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Q:
-            if self.plot.counter < self.len_list:
-                self.plot.keyPressEvent(event)
-            else:
-                self.plot.close()
-                self.layout.close()
-                self.exit()
-                sys.exit()
-        else:
-            self.plot.keyPressEvent(event)
+        self.plot.keyPressEvent(event)
 
     def mousePressEvent(self, event):
         self.plot.mousePressEvent(event)
@@ -359,10 +354,7 @@ class PGSpecPlotThread(QThread):
         self.SpecClass = SpecClass
         # Run the PGSpecPlotApp in a thread
         self.app = PGSpecPlotApp(self.specfile, self.SpecClass, **kwargs)
-        # Exit the thread when the app is closed
-        self.app.aboutToQuit.connect(self.exit)
 
     def run(self):
-        self.app.exec_()
-        self.exit()
-        sys.exit()
+        exit_code = self.app.exec_()
+        sys.exit(exit_code)
