@@ -182,13 +182,13 @@ When the tool is active, use the following keys:
 - **Left Arrow:**  
   Loads the previous spectrum (useful for reviewing).
 
-- **Right Arrow:**
+- **Right Arrow:**  
   Loads the next spectrum. Only for reviewing because this action does not save the classification and redshift of the current spectrum.
 
 - **Ctrl+Left Arrow:**  
   Goes back to the first spectrum in the list.
 
-- **Ctrl+Right Arrow:**
+- **Ctrl+Right Arrow:**  
   Goes to the last spectrum in the list.
 
 - **Ctrl+B:**  
