@@ -31,6 +31,13 @@ This repository provides a visual inspection tool for quasar spectra. The tool e
 You can create a new environment (e.g. `euclid`) and install the required packages using `conda`:
 
 ```bash
+conda create -n euclid python=3.13
+conda activate euclid
+pip install PySide6 specutils pyqtgraph astropy pandas specutils matplotlib setuptools
+```
+
+
+<!-- ```bash
 conda create -n euclid pyqtgraph pyside6 specutils astropy -c conda-forge
 conda activate euclid
 ```
@@ -40,7 +47,7 @@ Using the command above, `pandas`, `matplotlib`, and `numpy` will be installed a
 Alternatively, you can install the packages using `pip`:
 ```bash
 pip install PySide6 specutils pyqtgraph # install only the missing package(s)
-```
+``` -->
 
 - **Installation:**  
 
@@ -178,6 +185,14 @@ When the tool is active, use the following keys:
 - **Right Arrow:**
   Loads the next spectrum. Only for reviewing because this action does not save the classification and redshift of the current spectrum.
 
+- **Ctrl+Left Arrow:**  
+  Goes back to the first spectrum in the list.
+
+- **Ctrl+Right Arrow:**
+  Goes to the last spectrum in the list.
+
+- **Ctrl+B:**  
+  Goes back to the last labeled spectrum.
 ---
 
 ## History and Resuming Inspections
