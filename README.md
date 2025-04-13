@@ -15,7 +15,8 @@ A simple tool to manipulate and visualize optical spectra for astronomical resea
 To install the latest version of specbox, run the following command in your terminal:
 
 ```bash
-git clone https://github.com/rudolffu/specbox.git
+git clone https://github.com/rudolffu/specbox.git 
+# or git clone https://gitee.com/rudolffu/specbox.git 
 cd specbox
 python -m pip install .
 ```

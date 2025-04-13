@@ -54,7 +54,8 @@ pip install PySide6 specutils pyqtgraph # install only the missing package(s)
 To install `specbox`, clone the repository and run the following command in the terminal:
 
 ```bash
-git clone https://github.com/rudolffu/specbox.git
+git clone https://github.com/rudolffu/specbox.git 
+# or git clone https://gitee.com/rudolffu/specbox.git 
 cd specbox
 python -m pip install .
 ```
