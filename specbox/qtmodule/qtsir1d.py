@@ -16,14 +16,15 @@ from astropy.coordinates import SkyCoord
 from astropy.stats import sigma_clip
 import pandas as pd
 # locate the data file in the package
-import pkg_resources
+from importlib.resources import files  # Python 3.9+
+from pathlib import Path
 import os
 
-data_path = pkg_resources.resource_filename('specbox', 'data/')
-
-tb_temp = Table.read(data_path + 'optical_nir_qso_template.fits')
+data_path = Path(files("specbox").joinpath("data"))
+fits_file = data_path / "optical_nir_qso_template.fits"
+tb_temp = Table.read(str(fits_file))
 tb_temp.rename_columns(['wavelength', 'flux'], ['Wave', 'Flux'])
-viewer_version = '1.2'
+viewer_version = '1.2.1'
 
 class PGSpecPlot(pg.PlotWidget):
     def __init__(self, specfile, SpecClass=SpecEuclid1d, initial_counter=0, z_max=5.0, history_dict=None):
@@ -166,6 +167,8 @@ class PGSpecPlot(pg.PlotWidget):
         self.spec = spec
         if spec.objid in self.history:
             spec.z_vi = self.history[spec.objid][4]
+            class_vi = self.history[spec.objid][3]
+            print(f"\tVisual class from history: {class_vi}.")
         self.update_slider_and_spin()  
         self.plot_single()
         self.counter += 1
@@ -180,6 +183,8 @@ class PGSpecPlot(pg.PlotWidget):
             self.spec = spec
             if spec.objid in self.history:
                 spec.z_vi = self.history[spec.objid][4]
+                class_vi = self.history[spec.objid][3]
+                print(f"\tVisual class from history: {class_vi}.")
             self.counter -= 1
             self.update_slider_and_spin()
             self.plot_single()
@@ -204,8 +209,8 @@ class PGSpecPlot(pg.PlotWidget):
                 # Create a DataFrame from the current history
                 df_new = pd.DataFrame.from_dict(self.history, orient='index')
                 df_new.reset_index(inplace=True)
-                df_new.rename(columns={'index': 'objid', 0: 'objname', 1: 'ra', 2: 'dec', 3: 'vi_class', 4: 'z_vi'}, inplace=True)
-                df_new = df_new[['objid', 'objname', 'ra', 'dec', 'vi_class', 'z_vi']]
+                df_new.rename(columns={'index': 'objid', 0: 'objname', 1: 'ra', 2: 'dec', 3: 'class_vi', 4: 'z_vi'}, inplace=True)
+                df_new = df_new[['objid', 'objname', 'ra', 'dec', 'class_vi', 'z_vi']]
                 df_new.to_csv(temp_filename, index=False)
         if event.key() == Qt.Key_M:
             mouse_pos = self.mapFromGlobal(QCursor.pos())
@@ -227,19 +232,19 @@ class PGSpecPlot(pg.PlotWidget):
             self.addItem(self.text)
             print("Wavelength: {0:.2f} Flux: {1:.2f}".format(wave, flux))
         if event.key() == Qt.Key_S:
-            print("Class: STAR.")
+            print("\tClass: STAR.")
             self.history[spec.objid] = [spec.objname, spec.ra, spec.dec, 'STAR', 0.0]
         if event.key() == Qt.Key_G:
-            print("Class: GALAXY.")
+            print("\tClass: GALAXY.")
             self.history[spec.objid] = [spec.objname, spec.ra, spec.dec, 'GALAXY', self.spec.z_vi]
         if event.key() == Qt.Key_A:
-            print("Class: QSO(AGN).")
+            print("\tClass: QSO(AGN).")
             self.history[spec.objid] = [spec.objname, spec.ra, spec.dec, 'QSO', self.spec.z_vi]
         if event.key() == Qt.Key_U:
-            print("Class: UNKNOWN.")
+            print("\tClass: UNKNOWN.")
             self.history[spec.objid] = [spec.objname, spec.ra, spec.dec, 'UNKNOWN', 0.0]
         if event.key() == Qt.Key_L:
-            print("Class: LIKELY/Unusual QSO.")
+            print("\tClass: LIKELY/Unusual QSO.")
             self.history[spec.objid] = [spec.objname, spec.ra, spec.dec, 'LIKELY', self.spec.z_vi]
         if event.key() == Qt.Key_R:
             self.clear()
@@ -280,10 +285,12 @@ class PGSpecPlotApp(QApplication):
         if load_history and os.path.exists(self.output_file):
             print(f"Loading history from {self.output_file} ...")
             df = pd.read_csv(self.output_file)
+            if 'vi_class' in df.columns:
+                df.rename(columns={'vi_class': 'class_vi'}, inplace=True)
             # Build a history dictionary from the CSV
             history_dict = {}
             for idx, row in df.iterrows():
-                history_dict[int(row['objid'])] = [row['objname'], row['ra'], row['dec'], row['vi_class'], row['z_vi']]
+                history_dict[int(row['objid'])] = [row['objname'], row['ra'], row['dec'], row['class_vi'], row['z_vi']]
             initial_counter = df.shape[0]  # assuming rows are in order
         else:
             history_dict = {}
@@ -342,8 +349,8 @@ class PGSpecPlotApp(QApplication):
         # Merge history from PGSpecPlot with any new entries and save
         df_new = pd.DataFrame.from_dict(self.plot.history, orient='index')
         df_new.reset_index(inplace=True)
-        df_new.rename(columns={'index': 'objid', 0: 'objname', 1: 'ra', 2: 'dec', 3: 'vi_class', 4: 'z_vi'}, inplace=True)
-        df_new = df_new[['objid', 'objname', 'ra', 'dec', 'vi_class', 'z_vi']]
+        df_new.rename(columns={'index': 'objid', 0: 'objname', 1: 'ra', 2: 'dec', 3: 'class_vi', 4: 'z_vi'}, inplace=True)
+        df_new = df_new[['objid', 'objname', 'ra', 'dec', 'class_vi', 'z_vi']]
         # Save the merged history
         df_new.to_csv(self.output_file, index=False)
 
