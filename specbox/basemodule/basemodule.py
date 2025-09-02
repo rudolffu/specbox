@@ -913,10 +913,11 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             data = data[11:511]
         self.hdu = hdu
         self.data = data
+        fscale = hdu.header.get('FSCALE', 1.0)
         self.wave = data['WAVELENGTH'] * u.Angstrom
-        self.flux = data['SIGNAL'] * 1e-16 * u.erg / u.s / u.cm**2 / u.Angstrom
+        self.flux = data['SIGNAL'] * fscale * u.erg / u.s / u.cm**2 / u.Angstrom
         variance = data['VAR']
-        self.err = np.sqrt(variance) * 1e-16 
+        self.err = np.sqrt(variance) * fscale
         self.spec = Spectrum1D(spectral_axis=self.wave, 
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
