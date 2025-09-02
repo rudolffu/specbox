@@ -60,6 +60,8 @@ class PGSpecPlot(pg.PlotWidget):
         self.setMouseEnabled(x=True, y=True)
         self.setLogMode(x=False, y=False)
         self.setAspectLocked(False)
+        left_axis = self.getAxis('left')
+        left_axis.enableAutoSIPrefix(False)
         self.enableAutoRange()
         self.vb = self.getViewBox()
         self.vb.setMouseMode(self.vb.RectMode)
