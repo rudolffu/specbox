@@ -1,6 +1,6 @@
 from PySide6.QtGui import QCursor, QFont
-from PySide6.QtCore import Qt, QThread
-from PySide6.QtWidgets import QApplication, QFrame, QWidget, QSlider, QHBoxLayout, QDoubleSpinBox
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtWidgets import QApplication, QFrame, QWidget, QSlider, QHBoxLayout, QVBoxLayout, QLabel, QDoubleSpinBox, QSizePolicy
 import sys
 from ..basemodule import *
 import pyqtgraph as pg
@@ -29,6 +29,8 @@ class PGSpecPlot(pg.PlotWidget):
     :class:`~specbox.basemodule.ConvenientSpecMixin` (e.g. ``SpecEuclid1d``,
     ``SpecLAMOST``).
     """
+    
+    coordinate_changed = Signal(float, float)  # Signal for coordinate updates
 
     def __init__(self, spectra, SpecClass=SpecEuclid1d, initial_counter=0,
                  z_max=5.0, history_dict=None):
@@ -80,6 +82,21 @@ class PGSpecPlot(pg.PlotWidget):
         self.slider.setTickPosition(QSlider.TicksBelow)
         self.slider.setTickInterval(max(1, int((self.slider_max - self.slider_min) / 10)))
         self.slider.valueChanged.connect(self.slider_changed)
+
+        # Create spectrum info title box
+        self.spectrum_info_label = QLabel()
+        self.spectrum_info_label.setFont(QFont("Arial", 14))
+        self.spectrum_info_label.setStyleSheet("""
+            QLabel {
+                background-color: #f0f0f0;
+                border: 2px solid #666666;
+                padding: 8px;
+                color: black;
+                border-radius: 5px;
+            }
+        """)
+        self.spectrum_info_label.setAlignment(Qt.AlignCenter)
+        self.spectrum_info_label.setText("Loading spectrum info...")
 
         self.redshiftSpin = QDoubleSpinBox()
         self.redshiftSpin.setMinimum(self.z_min)
@@ -195,16 +212,37 @@ class PGSpecPlot(pg.PlotWidget):
             self.plot(wave_temp, flux_temp, pen=(240, 128, 128), symbol='+',
                       symbolSize=2, symbolPen=None)
 
-        self.legend = self.addLegend(labelTextSize='16pt')
-        self.text = pg.TextItem(text="{0}  {1}  z_vi = {2:.4f}, z_gaia = {3:.4f}".format(
-            self.message, objname, z_vi, z_gaia), anchor=(0, 0), color='k',
-            border='w', fill=(255, 255, 255, 200))
-        self.text.setPos(wave[0] * 1.3, flux.max() * 1.3)
-        self.text.setFont(QFont("Arial", 14))
-        self.addItem(self.text)
         self.setLabel('left', "Flux", units=spec.flux.unit.to_string())
         self.setLabel('bottom', "Wavelength", units=spec.wave.unit.to_string())
+
+        # Update info label above plot
+        self.update_spectrum_info_label()
+        
         self.autoRange()
+
+    def update_spectrum_info_label(self):
+        """Update the spectrum info label above the plot."""
+        if not hasattr(self, 'spec'):
+            return
+            
+        spec = self.spec
+        z_vi = getattr(spec, 'z_vi', 0.0)
+        z_gaia = getattr(spec, 'z_gaia', 0.0)
+        objname = getattr(spec, 'objname', 'Unknown')
+        objid = getattr(spec, 'objid', 'Unknown')
+        
+        # Calculate the display number based on which spectrum we're actually showing
+        if hasattr(self, '_displaying_spectrum_number'):
+            current_spectrum_number = self._displaying_spectrum_number
+        else:
+            # Fallback to counter (this handles template updates and other cases)
+            current_spectrum_number = self.counter if hasattr(self, 'len_list') else 1
+
+        message = f"Spectrum {current_spectrum_number}/{self.len_list}" if hasattr(self, 'len_list') else ""
+        text_content = f"{message}  ID: {objid}  z_vi = {z_vi:.4f}, z_gaia = {z_gaia:.4f}"
+        
+        if hasattr(self, 'spectrum_info_label'):
+            self.spectrum_info_label.setText(text_content)
 
     # ------------------------------------------------------------------
     # Navigation
@@ -212,8 +250,7 @@ class PGSpecPlot(pg.PlotWidget):
         if self.counter >= self.len_list:
             print("No more spectra to plot.")
             return
-        self.message = "Spectrum {0}/{1}.".format(self.counter + 1, self.len_list)
-        print(self.message)
+            
         self.clear()
         spec = self._load_spec(self.counter)
         self.spec = spec
@@ -221,14 +258,22 @@ class PGSpecPlot(pg.PlotWidget):
             spec.z_vi = self.history[spec.objid][4]
             class_vi = self.history[spec.objid][3]
             print(f"\tVisual class from history: {class_vi}.")
+            
+        # Set the display number before plotting (counter + 1 because we haven't incremented yet)
+        self._displaying_spectrum_number = self.counter + 1
+        print(f"Spectrum {self._displaying_spectrum_number}/{self.len_list}.")
+        
         self.update_slider_and_spin()
         self.plot_single()
+        
+        # Emit coordinate change signal for future extensions
+        if hasattr(self.spec, 'ra') and hasattr(self.spec, 'dec'):
+            self.coordinate_changed.emit(self.spec.ra, self.spec.dec)
+            
         self.counter += 1
 
     def plot_previous(self):
         if self.counter > 1:
-            self.message = "Spectrum {0}/{1}.".format(self.counter - 1, self.len_list)
-            print(self.message)
             self.clear()
             spec = self._load_spec(self.counter - 2)
             self.spec = spec
@@ -236,9 +281,18 @@ class PGSpecPlot(pg.PlotWidget):
                 spec.z_vi = self.history[spec.objid][4]
                 class_vi = self.history[spec.objid][3]
                 print(f"\tVisual class from history: {class_vi}.")
+                
             self.counter -= 1
+            # Set the display number before plotting (counter is correct after decrement)
+            self._displaying_spectrum_number = self.counter
+            print(f"Spectrum {self._displaying_spectrum_number}/{self.len_list}.")
+            
             self.update_slider_and_spin()
             self.plot_single()
+            
+            # Emit coordinate change signal for future extensions
+            if hasattr(self.spec, 'ra') and hasattr(self.spec, 'dec'):
+                self.coordinate_changed.emit(self.spec.ra, self.spec.dec)
         else:
             print("No previous spectrum to plot.")
 
@@ -250,6 +304,9 @@ class PGSpecPlot(pg.PlotWidget):
             if spec.objid not in self.history:
                 self.history[spec.objid] = [spec.objname, spec.ra, spec.dec,
                                             'QSO(Default)', spec.z_vi]
+            else:
+                # Update existing entry with current z_vi (preserves classification but updates redshift)
+                self.history[spec.objid][4] = spec.z_vi
             if self.counter < self.len_list:
                 self.clear()
                 self.plot_next()
@@ -269,7 +326,7 @@ class PGSpecPlot(pg.PlotWidget):
             mouse_pos = self.mapFromGlobal(QCursor.pos())
             self.vb = self.getViewBox()
             mouse_pos = self.vb.mapSceneToView(mouse_pos)
-            print(mouse_pos)
+            print(f"Mouse position - Wavelength: {mouse_pos.x():.2f}, Flux: {mouse_pos.y():.2e}")
         if event.key() == Qt.Key_Space:
             mouse_pos = self.mapFromGlobal(QCursor.pos())
             self.vb = self.getViewBox()
@@ -277,14 +334,14 @@ class PGSpecPlot(pg.PlotWidget):
             idx = np.abs(self.wave - wave).argmin()
             wave = self.wave[idx]
             flux = self.flux[idx]
-            self.text = pg.TextItem(
-                text="Wavelength: {0:.2f} Flux: {1:.2f} x 1e-17".format(
-                    wave, flux*1e17), anchor=(0, 0), color='r', border='w',
+            annotation_text = pg.TextItem(
+                text="Wavelength: {0:.2f} Flux: {1:.2e}".format(wave, flux), 
+                anchor=(0, 0), color='r', border='w',
                 fill=(255, 255, 255, 200))
-            self.text.setFont(QFont("Arial", 18, QFont.Bold))
-            self.text.setPos(wave, flux)
-            self.addItem(self.text)
-            print("Wavelength: {0:.2f} Flux: {1:.2f}".format(wave, flux))
+            annotation_text.setFont(QFont("Arial", 18, QFont.Bold))
+            annotation_text.setPos(wave, flux)
+            self.addItem(annotation_text)
+            print("Wavelength: {0:.2f} Flux: {1:.2e}".format(wave, flux))
         if event.key() == Qt.Key_S:
             print("\tClass: STAR.")
             self.history[spec.objid] = [spec.objname, spec.ra, spec.dec,
@@ -312,6 +369,8 @@ class PGSpecPlot(pg.PlotWidget):
             if event.key() == Qt.Key_R:
                 self.clear()
                 self.spec = self._load_spec(self.counter - 1)
+                # For reload, display number is current counter
+                self._displaying_spectrum_number = self.counter
                 self.update_slider_and_spin()
                 self.plot_single()
             if event.key() == Qt.Key_Right:
@@ -320,8 +379,8 @@ class PGSpecPlot(pg.PlotWidget):
                 self.plot_next()
             if event.key() == Qt.Key_Left:
                 self.clear()
-                self.counter = 2
-                self.plot_previous()
+                self.counter = 0
+                self.plot_next()
             if event.key() == Qt.Key_B:
                 self.clear()
                 self.counter = len(self.history) - 1
@@ -371,33 +430,36 @@ class PGSpecPlotApp(QApplication):
         layout.resize(1200, 800)
         layout.setWindowTitle(f"PGSpecPlot - Spectra Viewer (v{viewer_version})")
         if self.plot.counter < self.len_list + 1:
-            toplabel = layout.addLabel(
-                "Press 'Q' for next spectrum, \t press no key or 'A' to set class as QSO(AGN),\n"
-                "'U' to set class as UNKNOWN,\t 'L' for LIKELY/Unusual QSO,\t 'S' for STAR, and 'G' for GALAXY,\n"
-                "'M' to get mouse position, \t\t 'Space' to get spectrum value at current wavelength.\n"
-                "Use mouse scroll to zoom in/out,\t use mouse select to zoom in.\n"
-                "Press 'R' to reset the zoom scale.\t"
-                "Press 'Ctrl+R' to reset the plot with the initial z_vi.\n"
-                "Press 'Left' to plot the previous spectrum,\t press 'Right' to plot the next spectrum.\n",
-                row=0, col=0, colspan=2)
-            toplabel.setFont(QFont("Arial", 16))
-            toplabel.setFixedHeight(140)
-            toplabel.setAlignment(Qt.AlignLeft)
+            # Instructions with comprehensive keyboard shortcuts
+            instruction_text = (
+                "Navigation: 'Q' next spectrum, Left/Right arrows previous/next | "
+                "Classification: 'A' QSO(AGN), 'S' STAR, 'G' GALAXY, 'U' UNKNOWN, 'L' LIKELY | "
+                "Tools: 'Space' wavelength info, 'M' mouse position, 'R' reset zoom | "
+                "Advanced: Ctrl+R reload, Ctrl+Left first, Ctrl+Right last, Ctrl+B resume from history"
+            )
+            toplabel = layout.addLabel(instruction_text, row=0, col=0, colspan=2)
+            toplabel.setFont(QFont("Arial", 13))
+            toplabel.setMinimumHeight(60)
+            toplabel.setMaximumHeight(80)
+            toplabel.setAlignment(Qt.AlignLeft | Qt.AlignTop)
             toplabel.setStyleSheet("background-color: white;color: black;")
             toplabel.setFrameStyle(QFrame.Panel | QFrame.Raised)
-            toplabel.setLineWidth(2)
+            toplabel.setWordWrap(True)
             toplabel.setMidLineWidth(2)
             toplabel.setFrameShadow(QFrame.Sunken)
             toplabel.setMargin(5)
             toplabel.setIndent(5)
             toplabel.setWordWrap(True)
-            layout.addWidget(self.plot, row=1, col=0, colspan=2)
+            
+            # Add spectrum info label above plot
+            layout.addWidget(self.plot.spectrum_info_label, row=1, col=0, colspan=2)
+            layout.addWidget(self.plot, row=2, col=0, colspan=2)
             slider_container = QWidget()
             slider_layout = QHBoxLayout()
             slider_layout.addWidget(self.plot.slider)
             slider_layout.addWidget(self.plot.redshiftSpin)
             slider_container.setLayout(slider_layout)
-            layout.addWidget(slider_container, row=2, col=0, colspan=2)
+            layout.addWidget(slider_container, row=3, col=0, colspan=2)
             self.layout = layout
             self.layout.show()
 
@@ -420,9 +482,16 @@ class PGSpecPlotApp(QApplication):
 class PGSpecPlotThread(QThread):
     """Run :class:`PGSpecPlotApp` in a separate thread."""
 
-    def __init__(self, spectra, SpecClass=SpecEuclid1d, **kwargs):
+    def __init__(self, spectra=None, SpecClass=SpecEuclid1d, specfile=None, **kwargs):
         super().__init__()
-        self.spectra = spectra
+        # Handle backward compatibility: if specfile is provided but spectra is not
+        if spectra is None and specfile is not None:
+            self.spectra = specfile
+        elif spectra is not None:
+            self.spectra = spectra
+        else:
+            raise ValueError("Either 'spectra' or 'specfile' must be provided")
+            
         self.SpecClass = SpecClass
         self.app = PGSpecPlotApp(self.spectra, self.SpecClass, **kwargs)
 
