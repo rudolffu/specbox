@@ -3,7 +3,12 @@
 Example script for using the enhanced spectrum viewer with image cutouts.
 """
 
-from specbox.qtmodule import PGSpecPlotThreadEnhanced
+# Prefer the enhanced thread if available, otherwise fall back to the standard one
+try:
+    from specbox.qtmodule import PGSpecPlotThreadEnhanced
+except Exception:
+    from specbox.qtmodule import PGSpecPlotThread as PGSpecPlotThreadEnhanced
+
 from specbox.basemodule import SpecEuclid1d  # or SpecLAMOST, SpecSDSS, etc.
 
 def run_enhanced_viewer():
