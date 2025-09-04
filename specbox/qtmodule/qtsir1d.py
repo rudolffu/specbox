@@ -5,7 +5,7 @@ The functionality of the original ``qtsir1d`` viewer has been merged into
 imports continue to work.
 """
 
-from qtmodule import PGSpecPlot, PGSpecPlotApp, PGSpecPlotThread
+from .qtmodule import PGSpecPlot, PGSpecPlotApp, PGSpecPlotThread
 
 __all__ = ['PGSpecPlot', 'PGSpecPlotApp', 'PGSpecPlotThread']
 
