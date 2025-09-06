@@ -12,7 +12,7 @@ from astropy.nddata import StdDevUncertainty,VarianceUncertainty,InverseVariance
 from astropy.table import Table
 from astropy import units as u
 from astropy.coordinates import SkyCoord
-from specutils import Spectrum1D,SpectrumCollection,SpectrumList
+from specutils import Spectrum,SpectrumCollection,SpectrumList
 from specutils.manipulation import FluxConservingResampler, LinearInterpolatedResampler, SplineInterpolatedResampler, median_smooth
 from ..auxmodule  import designation
 import warnings
@@ -52,7 +52,7 @@ class ConvenientSpecMixin():
         self.flux = flux
         self.err = err
         if self.wave is not None and self.flux is not None:
-            self.spec = Spectrum1D(spectral_axis=self.wave, 
+            self.spec = Spectrum(spectral_axis=self.wave, 
                                    flux=self.flux, 
                                    uncertainty=StdDevUncertainty(self.err))
 
@@ -170,7 +170,7 @@ class ConvenientSpecMixin():
             self.wave = wave
             self.flux = flux
             self.err = err
-            self.spec = Spectrum1D(spectral_axis=self.wave, 
+            self.spec = Spectrum(spectral_axis=self.wave, 
                                    flux=self.flux, 
                                    uncertainty=StdDevUncertainty(self.err))
             self.trimmed = True
@@ -235,7 +235,7 @@ class ConvenientSpecMixin():
         if inplace == True:
             self.flux_ori = self.flux
             self.flux = flux_sm
-            self.spec = Spectrum1D(spectral_axis=self.wave, 
+            self.spec = Spectrum(spectral_axis=self.wave, 
                                    flux=self.flux_sm, 
                                    uncertainty=StdDevUncertainty(self.err)) 
         return self
@@ -271,7 +271,7 @@ class ConvenientSpecMixin():
                 Redshift of the spectrum.
             inplace : bool  
                 If True, the spectrum is converted to the rest-frame in place.
-                If False, only a new Spectrum1D object is created.
+                If False, only a new Spectrum object is created.
         """
         if z is None:
             z = self.redshift
@@ -283,7 +283,7 @@ class ConvenientSpecMixin():
             self.wave /= (1+z)
             self.flux *= (1+z)
             self.err *= (1+z)
-            self.spec_rest = Spectrum1D(spectral_axis=self.wave, 
+            self.spec_rest = Spectrum(spectral_axis=self.wave, 
                                         flux=self.flux, 
                                         uncertainty=StdDevUncertainty(self.err))
             if inplace == True:
@@ -376,7 +376,7 @@ class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
             redshift = self.hdu[2].data['Z'][0] if 'Z' in self.hdu[2].data.columns.names else header['Z']
         self.redshift = redshift
         # self.objname = self.hdr['OBJNAME']
-        self.spec = Spectrum1D(spectral_axis=self.wave, flux=self.flux, 
+        self.spec = Spectrum(spectral_axis=self.wave, flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
         self.filename = filename
         self.objname = designation(self.ra, self.dec)
@@ -499,7 +499,7 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
             self.err = data[3,0,:]
         else:
             print("Warning: format neither onedspec nor multispec (3d)!\n")
-        self.spec = Spectrum1D(spectral_axis=self.wave, 
+        self.spec = Spectrum(spectral_axis=self.wave, 
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
     
@@ -604,7 +604,7 @@ class SpecLAMOST(ConvenientSpecMixin, SpecIOMixin):
         self.wave = wave * self.wave_unit
         self.flux = flux * self.flux_unit
         self.err = err
-        self.spec = Spectrum1D(spectral_axis=self.wave, 
+        self.spec = Spectrum(spectral_axis=self.wave, 
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
 
@@ -637,9 +637,9 @@ class DoubleSpec():
         new_disp_grid = np.arange(bwave[0], rwave[-1], spb.CD1_1) * u.AA
         newdata = np.empty([4,1,len(new_disp_grid)])
         for i in range(4):
-            spec1 = Spectrum1D(spectral_axis=bwave*u.AA, 
+            spec1 = Spectrum(spectral_axis=bwave*u.AA, 
                                flux=spb.data[i,0,:]* u.Unit('erg cm-2 s-1 AA-1')) 
-            spec2 = Spectrum1D(spectral_axis=rwave*u.AA, 
+            spec2 = Spectrum(spectral_axis=rwave*u.AA, 
                                flux=spr.data[i,0,:]* u.Unit('erg cm-2 s-1 AA-1'))     
             resampler = LinearInterpolatedResampler(extrapolation_treatment='zero_fill')
             new_spec1 = resampler(spec1, new_disp_grid)
@@ -759,7 +759,7 @@ class NIRSpecS3d():
         # get mask information
         mask_name = hdr.get("MASKEXT", "DQ")
         mask = hdu[mask_name].data.T
-        spec = Spectrum1D(flux=flux, spectral_axis=wavelength, meta=meta,
+        spec = Spectrum(flux=flux, spectral_axis=wavelength, meta=meta,
                           uncertainty=err, mask=mask) 
         self.spec1d = spec
         
@@ -783,11 +783,11 @@ class SpecCoadd1d(ConvenientSpecMixin, SpecIOMixin):
         self.flux = data['flux'] * self.flux_unit
         self.err = data['sigma'] * self.flux_unit
         self.telluric = data['telluric'] * self.flux_unit
-        self.spec = Spectrum1D(
+        self.spec = Spectrum(
             spectral_axis=self.wave, 
             flux=self.flux, 
             uncertainty=StdDevUncertainty(self.err))
-        self.telluric_spec = Spectrum1D(
+        self.telluric_spec = Spectrum(
             spectral_axis=self.wave,
             flux=self.telluric)
                                         
@@ -918,7 +918,7 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.flux = data['SIGNAL'] * fscale * u.erg / u.s / u.cm**2 / u.Angstrom
         variance = data['VAR']
         self.err = np.sqrt(variance) * fscale
-        self.spec = Spectrum1D(spectral_axis=self.wave, 
+        self.spec = Spectrum(spectral_axis=self.wave, 
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
         self.objname = hdu.name
