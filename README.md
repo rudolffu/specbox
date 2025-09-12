@@ -11,6 +11,9 @@ A simple tool to manipulate and visualize optical spectra for astronomical resea
 - [`specutils`](https://specutils.readthedocs.io/en/stable/installation.html)
 - `matplotlib`
 - `pandas`
+- `requests`
+- `pillow` (PIL)
+- `astroquery`
 
 To install the latest version of specbox, run the following command in your terminal:
 
