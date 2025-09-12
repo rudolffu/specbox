@@ -27,13 +27,16 @@ This repository provides a visual inspection tool for quasar spectra. The tool e
   - pandas
   - astropy
   - specutils
+  - requests
+  - pillow (PIL)
+  - astroquery
 
 You can create a new environment (e.g. `euclid`) and install the required packages using `conda`:
 
 ```bash
 conda create -n euclid python=3.13
 conda activate euclid
-pip install PySide6 specutils pyqtgraph astropy pandas specutils matplotlib setuptools
+pip install PySide6 specutils pyqtgraph astropy pandas matplotlib requests pillow astroquery setuptools
 ```
 
 
