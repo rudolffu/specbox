@@ -42,22 +42,23 @@ viewer_version = '1.3.0-pre'
 # Rest-frame emission lines used for template annotations.
 # All values are in Angstrom.
 _TEMPLATE_EMISSION_LINES = [
-    (r"Ly $\alpha$", 1215.67),
-    ("C IV", 1549.48),
+    ("Ly α", 1215.67),
+    ("C IV", 1549.06),
     ("C III]", 1908.73),
-    ("Mg II", 2798.0),
+    ("Mg II", 2798.75),
     ("[O II]", 3728.48),
-    (r"H $\beta$", 4861.33),
-    ("[O III] 4959", 4958.91),
-    ("[O III] 5007", 5006.84),
+    ("Hβ", 4862.68),
+    ("[O III]", 4960.30),
+    ("[O III]", 5008.24),
+    ("Hα", 6564.61),
     ("O I", 8448.7),
     ("[S III]", 9071.1),
     ("[S III]", 9533.2),
-    (r"Pa $\delta$", 10052.1),
+    ("Pa δ", 10052.1),
     ("He I", 10833.2),
-    (r"Pa $\gamma$", 10941.1),
+    ("Pa γ", 10941.1),
     ("O I", 11290.0),
-    (r"Pa $\beta$", 12821.6),
+    ("Pa β", 12821.6),
 ]
 
 
@@ -514,10 +515,14 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
     coordinate_changed = Signal(float, float)  # Signal for coordinate updates
     
     def __init__(self, spectra, SpecClass=SpecEuclid1d, initial_counter=0,
-                 z_max=5.0, history_dict=None):
+                 z_max=5.0, history_dict=None, euclid_fits=None):
         super().__init__()
         self.SpecClass = SpecClass
         self.template_manager = TemplateManager()
+        self.euclid_fits = euclid_fits
+        self._euclid_overlay_cache = {}
+        self._observed_wmin = None
+        self._observed_wmax = None
 
         # ``spectra`` can either be a FITS file containing multiple extensions
         # or a list of individual spectrum files.
@@ -674,6 +679,8 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         """Plot the spectrum without template."""
         spec = self.spec
         is_sparcl = 'SpecSparcl' in globals() and isinstance(spec, SpecSparcl)
+        self._observed_wmin = None
+        self._observed_wmax = None
         
         # Follow original code pattern with sigma clipping
         wave_full = spec.wave.value if hasattr(spec.wave, 'value') else spec.wave
@@ -704,10 +711,41 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                     polyorder = 3 if window_length > 3 else 2
                     flux_sm = savgol_filter(flux, window_length=window_length, polyorder=polyorder)
                     self.plot(wave, flux_sm, pen=pg.mkPen('k', width=3), antialias=True)
+
+            # Optional: overlay matching Euclid spectrum (extname == euclid_object_id).
+            euclid_object_id = getattr(spec, "euclid_object_id", None)
+            if self.euclid_fits is not None and euclid_object_id not in (None, "", 0):
+                euclid_spec = self._load_euclid_overlay(euclid_object_id)
+                if euclid_spec is not None:
+                    euclid_wave = euclid_spec.wave.value
+                    euclid_flux = euclid_spec.flux.value
+                    scale = 1.0
+                    denom = np.nanmedian(np.abs(euclid_flux))
+                    numer = np.nanmedian(np.abs(flux))
+                    if np.isfinite(denom) and denom > 0 and np.isfinite(numer) and numer > 0:
+                        scale = numer / denom
+                    self.plot(
+                        euclid_wave,
+                        euclid_flux * scale,
+                        pen=pg.mkPen((0, 150, 0, 180), width=2),
+                        antialias=True,
+                    )
+
+                    try:
+                        self._observed_wmin = float(min(np.nanmin(wave), np.nanmin(euclid_wave)))
+                        self._observed_wmax = float(max(np.nanmax(wave), np.nanmax(euclid_wave)))
+                    except Exception:
+                        self._observed_wmin = float(np.nanmin(wave))
+                        self._observed_wmax = float(np.nanmax(wave))
+            else:
+                self._observed_wmin = float(np.nanmin(wave))
+                self._observed_wmax = float(np.nanmax(wave))
         else:
             # Plot as dots connected by lines like original
             self.plot(wave, flux, pen='b', symbol='o', symbolSize=4, 
                      symbolPen=None, connect='finite', symbolBrush='k', antialias=True)
+            self._observed_wmin = float(np.nanmin(wave))
+            self._observed_wmax = float(np.nanmax(wave))
 
         # Update labels with proper units
         if hasattr(spec, 'flux_unit') and spec.flux_unit is not None:
@@ -734,7 +772,11 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                 flux_temp_scaled = flux_temp / np.mean(flux_temp) * np.abs(flux.mean()) * 1.5
                 
                 self.plot(wave_temp, flux_temp_scaled, pen=pg.mkPen('r', width=2), antialias=True)
-                self._label_template_emission_lines(wmin=float(np.nanmin(wave)), wmax=float(np.nanmax(wave)), z=z_vi)
+                self._label_template_emission_lines(
+                    wmin=self._observed_wmin if self._observed_wmin is not None else float(np.nanmin(wave)),
+                    wmax=self._observed_wmax if self._observed_wmax is not None else float(np.nanmax(wave)),
+                    z=z_vi,
+                )
         else:
             # For non-Euclid data, plot template unclipped
             template = self.template_manager.get_template(self.template_manager.current_template)
@@ -746,13 +788,17 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                 # For dataframe-backed SPARCL spectra (and similar), only plot the
                 # template over the observed wavelength range.
                 if is_sparcl:
-                    finite = np.isfinite(wave) & np.isfinite(flux)
-                    if np.any(finite):
-                        wmin = float(np.nanmin(wave[finite]))
-                        wmax = float(np.nanmax(wave[finite]))
+                    if self._observed_wmin is not None and self._observed_wmax is not None:
+                        wmin = float(self._observed_wmin)
+                        wmax = float(self._observed_wmax)
                     else:
-                        wmin = float(np.nanmin(wave))
-                        wmax = float(np.nanmax(wave))
+                        finite = np.isfinite(wave) & np.isfinite(flux)
+                        if np.any(finite):
+                            wmin = float(np.nanmin(wave[finite]))
+                            wmax = float(np.nanmax(wave[finite]))
+                        else:
+                            wmin = float(np.nanmin(wave))
+                            wmax = float(np.nanmax(wave))
                     idx = (wave_temp >= wmin) & (wave_temp <= wmax)
                     wave_temp = wave_temp[idx]
                     flux_temp = flux_temp[idx]
@@ -761,7 +807,11 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                 flux_temp_scaled = flux_temp / np.mean(flux_temp) * np.abs(flux.mean()) * 1.5
                 
                 self.plot(wave_temp, flux_temp_scaled, pen=pg.mkPen('r', width=2), antialias=True)
-                self._label_template_emission_lines(wmin=float(np.nanmin(wave)), wmax=float(np.nanmax(wave)), z=z_vi)
+                self._label_template_emission_lines(
+                    wmin=self._observed_wmin if self._observed_wmin is not None else float(np.nanmin(wave)),
+                    wmax=self._observed_wmax if self._observed_wmax is not None else float(np.nanmax(wave)),
+                    z=z_vi,
+                )
 
         self.setLabel('left', flux_unit_str)
         self.setLabel('bottom', wave_unit_str)
@@ -841,20 +891,24 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         flux_template = template['flux']
 
         if is_sparcl:
-            wave_full = self.spec.wave.value if hasattr(self.spec.wave, 'value') else self.spec.wave
-            flux_full = self.spec.flux.value if hasattr(self.spec.flux, 'value') else self.spec.flux
-            finite = np.isfinite(wave_full) & np.isfinite(flux_full)
-            in_range = (wave_full >= 3800) & (wave_full <= 9300)
-            finite_in_range = finite & in_range
-            if np.any(finite_in_range):
-                wmin = float(np.nanmin(wave_full[finite_in_range]))
-                wmax = float(np.nanmax(wave_full[finite_in_range]))
-            elif np.any(finite):
-                wmin = float(np.nanmin(wave_full[finite]))
-                wmax = float(np.nanmax(wave_full[finite]))
+            if self._observed_wmin is not None and self._observed_wmax is not None:
+                wmin = float(self._observed_wmin)
+                wmax = float(self._observed_wmax)
             else:
-                wmin = float(np.nanmin(wave_full))
-                wmax = float(np.nanmax(wave_full))
+                wave_full = self.spec.wave.value if hasattr(self.spec.wave, 'value') else self.spec.wave
+                flux_full = self.spec.flux.value if hasattr(self.spec.flux, 'value') else self.spec.flux
+                finite = np.isfinite(wave_full) & np.isfinite(flux_full)
+                in_range = (wave_full >= 3800) & (wave_full <= 9300)
+                finite_in_range = finite & in_range
+                if np.any(finite_in_range):
+                    wmin = float(np.nanmin(wave_full[finite_in_range]))
+                    wmax = float(np.nanmax(wave_full[finite_in_range]))
+                elif np.any(finite):
+                    wmin = float(np.nanmin(wave_full[finite]))
+                    wmax = float(np.nanmax(wave_full[finite]))
+                else:
+                    wmin = float(np.nanmin(wave_full))
+                    wmax = float(np.nanmax(wave_full))
             idx = (wave_shifted >= wmin) & (wave_shifted <= wmax)
             wave_shifted = wave_shifted[idx]
             flux_template = flux_template[idx]
@@ -870,17 +924,45 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         
         # Plot template unclipped (full wavelength range)
         self.plot(wave_shifted, flux_scaled, pen=pg.mkPen('r', width=2), antialias=True)
-        if hasattr(self, 'wave') and self.wave is not None and len(self.wave) > 0:
-            self._label_template_emission_lines(
-                wmin=float(np.nanmin(self.wave)),
-                wmax=float(np.nanmax(self.wave)),
-                z=z,
-            )
+        if self._observed_wmin is not None and self._observed_wmax is not None:
+            self._label_template_emission_lines(wmin=self._observed_wmin, wmax=self._observed_wmax, z=z)
+        elif hasattr(self, 'wave') and self.wave is not None and len(self.wave) > 0:
+            self._label_template_emission_lines(wmin=float(np.nanmin(self.wave)), wmax=float(np.nanmax(self.wave)), z=z)
         
         # Update info label to reflect new redshift
         self.update_spectrum_info_label()
         
         # Do NOT auto-range during template updates - preserves x-axis range
+
+    def _load_euclid_overlay(self, euclid_object_id):
+        if euclid_object_id is None:
+            return None
+        try:
+            if isinstance(euclid_object_id, float) and np.isnan(euclid_object_id):
+                return None
+        except Exception:
+            pass
+
+        key = euclid_object_id
+        if isinstance(key, (np.integer, int)):
+            key = int(key)
+        elif isinstance(key, (np.floating, float)):
+            if float(key).is_integer():
+                key = int(key)
+        key = str(key).strip()
+        if not key or key.lower() == "nan":
+            return None
+
+        if key in self._euclid_overlay_cache:
+            return self._euclid_overlay_cache[key]
+        try:
+            sp = SpecEuclid1d(self.euclid_fits, extname=key)
+        except Exception as e:
+            print(f"Euclid overlay load failed for extname={key}: {e}")
+            self._euclid_overlay_cache[key] = None
+            return None
+        self._euclid_overlay_cache[key] = sp
+        return sp
 
     def _label_template_emission_lines(self, *, wmin, wmax, z):
         """Overlay emission-line markers for the template within [wmin, wmax]."""
@@ -1150,11 +1232,12 @@ class PGSpecPlotAppEnhanced(QApplication):
             return s
 
     def __init__(self, spectra, SpecClass=SpecEuclid1d,
-                 output_file='vi_output.csv', z_max=5.0, load_history=False):
+                 output_file='vi_output.csv', z_max=5.0, load_history=False, euclid_fits=None):
         super().__init__(sys.argv)
         self.output_file = output_file
         self.spectra = spectra
         self.SpecClass = SpecClass
+        self.euclid_fits = euclid_fits
 
         if load_history and os.path.exists(self.output_file):
             print(f"Loading history from {self.output_file} ...")
@@ -1176,7 +1259,8 @@ class PGSpecPlotAppEnhanced(QApplication):
             self.spectra, self.SpecClass,
             initial_counter=initial_counter,
             z_max=z_max,
-            history_dict=history_dict)
+            history_dict=history_dict,
+            euclid_fits=self.euclid_fits)
         self.len_list = self.plot.len_list
         
         # Create buffer directory for cutouts
@@ -1377,27 +1461,36 @@ class PGSpecPlotAppEnhanced(QApplication):
 
     def save_png(self):
         """Save the entire application window as a PNG image."""
-        objid = getattr(self.plot.spec, "objid", "spectrum") if hasattr(self.plot, "spec") else "spectrum"
-        objid_str = str(objid).replace(os.sep, "_").replace(" ", "_")
-        default_name = f"{objid_str}.png"
-
-        filename, _ = QFileDialog.getSaveFileName(
-            self.layout,
-            "Save window as PNG",
-            default_name,
-            "PNG Files (*.png)",
+        objid = (
+            getattr(self.plot.spec, "objid", "spectrum")
+            if hasattr(self.plot, "spec")
+            else "spectrum"
         )
-        if not filename:
+        objid_str = str(objid).replace(os.sep, "_").replace(" ", "_")
+
+        out_dir = Path.cwd() / "saved_pngs"
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            QMessageBox.warning(self.layout, "Save PNG failed", f"Could not create {out_dir}: {e}")
             return
-        if not filename.lower().endswith(".png"):
-            filename += ".png"
+
+        filename = out_dir / f"{objid_str}.png"
+        if filename.exists():
+            i = 2
+            while True:
+                candidate = out_dir / f"{objid_str}_{i}.png"
+                if not candidate.exists():
+                    filename = candidate
+                    break
+                i += 1
 
         try:
             # Ensure latest visuals are painted before grabbing.
             self.layout.repaint()
             QApplication.processEvents()
             pixmap = self.layout.grab()
-            ok = pixmap.save(filename, "PNG")
+            ok = pixmap.save(str(filename), "PNG")
         except Exception as e:
             QMessageBox.warning(self.layout, "Save PNG failed", str(e))
             return

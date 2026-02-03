@@ -562,6 +562,7 @@ class SpecSparcl(SpecPandasRow):
                 "spectype",
                 "data_release",
                 "sparcl_id",
+                "euclid_object_id",
                 "_dr",
             ),
             array_cols={"mask": "mask", "model": "model"},
