@@ -42,22 +42,22 @@ viewer_version = '1.3.0-pre'
 # Rest-frame emission lines used for template annotations.
 # All values are in Angstrom.
 _TEMPLATE_EMISSION_LINES = [
-    ("Lyα", 1215.67),
+    (r"Ly $\alpha$", 1215.67),
     ("C IV", 1549.48),
     ("C III]", 1908.73),
     ("Mg II", 2798.0),
     ("[O II]", 3728.48),
-    ("Hβ", 4861.33),
+    (r"H $\beta$", 4861.33),
     ("[O III] 4959", 4958.91),
     ("[O III] 5007", 5006.84),
-    ("O I", 844.87 * 10.0),
-    ("[S III]", 907.11 * 10.0),
-    ("[S III]", 953.32 * 10.0),
-    (r"Pa$\delta$", 1005.21 * 10.0),
-    ("He I", 1083.32 * 10.0),
-    (r"Pa$\gamma$", 1094.11 * 10.0),
-    ("O I", 1129.0 * 10.0),
-    (r"Pa$\beta$", 1282.16 * 10.0),
+    ("O I", 8448.7),
+    ("[S III]", 9071.1),
+    ("[S III]", 9533.2),
+    (r"Pa $\delta$", 10052.1),
+    ("He I", 10833.2),
+    (r"Pa $\gamma$", 10941.1),
+    ("O I", 11290.0),
+    (r"Pa $\beta$", 12821.6),
 ]
 
 
