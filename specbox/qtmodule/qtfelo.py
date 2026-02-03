@@ -16,12 +16,13 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 import pandas as pd
 # locate the data file in the package
-import pkg_resources
+from importlib.resources import files
+from pathlib import Path
 
-data_path = pkg_resources.resource_filename('specbox', 'data/')
+data_path = Path(files("specbox").joinpath("data"))
 
 my_dict = {}
-tb_temp = Table.read(data_path + 'qso_temp_vandenberk2001.mrt.txt', format='ascii')
+tb_temp = Table.read(str(data_path / "qso_temp_vandenberk2001.mrt.txt"), format="ascii")
 
 class PGSpecPlotFeLo(pg.PlotWidget):
     """

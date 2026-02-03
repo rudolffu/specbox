@@ -25,6 +25,7 @@ from PIL import Image
 import io
 import json
 import hashlib
+from scipy.signal import savgol_filter
 from astroquery.hips2fits import hips2fits
 from astropy.coordinates import Longitude, Latitude, Angle
 import concurrent.futures
@@ -37,6 +38,27 @@ fits_file = data_path / "optical_nir_qso_template_v1.fits"
 tb_temp = Table.read(str(fits_file))
 tb_temp.rename_columns(['wavelength', 'flux'], ['Wave', 'Flux'])
 viewer_version = '1.3.0-pre'
+
+# Rest-frame emission lines used for template annotations.
+# All values are in Angstrom.
+_TEMPLATE_EMISSION_LINES = [
+    ("Lyα", 1215.67),
+    ("C IV", 1549.48),
+    ("C III]", 1908.73),
+    ("Mg II", 2798.0),
+    ("[O II]", 3728.48),
+    ("Hβ", 4861.33),
+    ("[O III] 4959", 4958.91),
+    ("[O III] 5007", 5006.84),
+    ("O I", 844.87 * 10.0),
+    ("[S III]", 907.11 * 10.0),
+    ("[S III]", 953.32 * 10.0),
+    (r"Pa$\delta$", 1005.21 * 10.0),
+    ("He I", 1083.32 * 10.0),
+    (r"Pa$\gamma$", 1094.11 * 10.0),
+    ("O I", 1129.0 * 10.0),
+    (r"Pa$\beta$", 1282.16 * 10.0),
+]
 
 
 class ImageCutoutWidget(QWidget):
@@ -505,8 +527,11 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             self.len_list = len(self.speclist)
         else:
             self.specfile = spectra
-            with fits.open(spectra) as hdul:
-                self.len_list = len(hdul) - 1
+            if hasattr(SpecClass, "count_in_file"):
+                self.len_list = int(SpecClass.count_in_file(spectra))
+            else:
+                with fits.open(spectra) as hdul:
+                    self.len_list = len(hdul) - 1
             self.speclist = None
 
         if initial_counter >= self.len_list:
@@ -609,7 +634,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         if not hasattr(spec, 'z_ph'):
             spec.z_ph = getattr(spec, 'redshift', 0.0)
         if not hasattr(spec, 'z_gaia'):
-            spec.z_gaia = getattr(spec, 'redshift', 0.0)
+            spec.z_gaia = None
         if not hasattr(spec, 'objid'):
             spec.objid = self.counter
         if not hasattr(spec, 'objname'):
@@ -648,10 +673,16 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
     def plot_single(self):
         """Plot the spectrum without template."""
         spec = self.spec
+        is_sparcl = 'SpecSparcl' in globals() and isinstance(spec, SpecSparcl)
         
         # Follow original code pattern with sigma clipping
         wave_full = spec.wave.value if hasattr(spec.wave, 'value') else spec.wave
         flux_full = spec.flux.value if hasattr(spec.flux, 'value') else spec.flux
+
+        if is_sparcl:
+            idx = (wave_full >= 3800) & (wave_full <= 9300)
+            wave_full = wave_full[idx]
+            flux_full = flux_full[idx]
         
         # Apply sigma clipping like original code
         flux_masked = np.ma.masked_invalid(flux_full)
@@ -663,9 +694,20 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self.wave = wave
         self.flux = flux
         
-        # Plot as dots connected by lines like original
-        self.plot(wave, flux, pen='b', symbol='o', symbolSize=4, 
-                 symbolPen=None, connect='finite', symbolBrush='k', antialias=True)
+        if is_sparcl:
+            # Make the raw SPARCL spectrum semi-transparent to emphasize smoothing.
+            self.plot(wave, flux, pen=pg.mkPen((0, 0, 255, 80), width=1), antialias=True)
+            n = int(len(flux))
+            if n >= 7:
+                window_length = min(31, n if n % 2 == 1 else n - 1)
+                if window_length >= 7:
+                    polyorder = 3 if window_length > 3 else 2
+                    flux_sm = savgol_filter(flux, window_length=window_length, polyorder=polyorder)
+                    self.plot(wave, flux_sm, pen=pg.mkPen('k', width=3), antialias=True)
+        else:
+            # Plot as dots connected by lines like original
+            self.plot(wave, flux, pen='b', symbol='o', symbolSize=4, 
+                     symbolPen=None, connect='finite', symbolBrush='k', antialias=True)
 
         # Update labels with proper units
         if hasattr(spec, 'flux_unit') and spec.flux_unit is not None:
@@ -691,8 +733,8 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                 # Use your original scaling with the sigma-clipped flux
                 flux_temp_scaled = flux_temp / np.mean(flux_temp) * np.abs(flux.mean()) * 1.5
                 
-                self.plot(wave_temp, flux_temp_scaled, pen=(240, 128, 128), symbol='+',
-                          symbolSize=2, symbolPen=None)
+                self.plot(wave_temp, flux_temp_scaled, pen=pg.mkPen('r', width=2), antialias=True)
+                self._label_template_emission_lines(wmin=float(np.nanmin(wave)), wmax=float(np.nanmax(wave)), z=z_vi)
         else:
             # For non-Euclid data, plot template unclipped
             template = self.template_manager.get_template(self.template_manager.current_template)
@@ -701,11 +743,25 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                 wave_temp = template['wave'] * (1 + z_vi)
                 flux_temp = template['flux']
                 
-                # Use your original scaling with the sigma-clipped flux
+                # For dataframe-backed SPARCL spectra (and similar), only plot the
+                # template over the observed wavelength range.
+                if is_sparcl:
+                    finite = np.isfinite(wave) & np.isfinite(flux)
+                    if np.any(finite):
+                        wmin = float(np.nanmin(wave[finite]))
+                        wmax = float(np.nanmax(wave[finite]))
+                    else:
+                        wmin = float(np.nanmin(wave))
+                        wmax = float(np.nanmax(wave))
+                    idx = (wave_temp >= wmin) & (wave_temp <= wmax)
+                    wave_temp = wave_temp[idx]
+                    flux_temp = flux_temp[idx]
+
+                # Use original scaling with the sigma-clipped flux
                 flux_temp_scaled = flux_temp / np.mean(flux_temp) * np.abs(flux.mean()) * 1.5
                 
-                self.plot(wave_temp, flux_temp_scaled, pen=(240, 128, 128), symbol='+',
-                          symbolSize=2, symbolPen=None)
+                self.plot(wave_temp, flux_temp_scaled, pen=pg.mkPen('r', width=2), antialias=True)
+                self._label_template_emission_lines(wmin=float(np.nanmin(wave)), wmax=float(np.nanmax(wave)), z=z_vi)
 
         self.setLabel('left', flux_unit_str)
         self.setLabel('bottom', wave_unit_str)
@@ -725,9 +781,22 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             
         spec = self.spec
         z_vi = getattr(spec, 'z_vi', 0.0)
-        z_gaia = getattr(spec, 'z_gaia', 0.0)
+        z_gaia = getattr(spec, 'z_gaia', None)
         objname = getattr(spec, 'objname', 'Unknown')
         objid = getattr(spec, 'objid', 'Unknown')
+
+        def _fmt_z(label, value, *, hide_zero=True):
+            if value is None:
+                return None
+            try:
+                v = float(value)
+            except Exception:
+                return None
+            if not np.isfinite(v):
+                return None
+            if hide_zero and v == 0.0:
+                return None
+            return f"{label} = {v:.4f}"
         
         # Calculate the display number based on which spectrum we're actually showing
         # In plot_next: counter gets incremented AFTER plotting, so counter+1 is the display number
@@ -740,7 +809,22 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             current_spectrum_number = self.counter if hasattr(self, 'len_list') else 1
 
         message = f"Spectrum {current_spectrum_number}/{self.len_list}" if hasattr(self, 'len_list') else ""
-        text_content = f"{message}  ID: {objid}  z_vi = {z_vi:.4f}, z_gaia = {z_gaia:.4f}"
+        parts = []
+        if message:
+            parts.append(message)
+        parts.append(f"ID: {objid}")
+        parts.append(_fmt_z("z_vi", z_vi, hide_zero=False) or "z_vi = -")
+
+        if 'SpecSparcl' in globals() and isinstance(spec, SpecSparcl):
+            dr = str(getattr(spec, 'data_release', '') or '')
+            if 'desi' in dr.lower():
+                parts.append(_fmt_z("z_desi", getattr(spec, 'redshift', None), hide_zero=False) or "z_desi = -")
+
+        z_gaia_str = _fmt_z("z_gaia", z_gaia, hide_zero=True)
+        if z_gaia_str is not None:
+            parts.append(z_gaia_str)
+
+        text_content = "  ".join(parts)
         
         if hasattr(self, 'spectrum_info_label'):
             self.spectrum_info_label.setText(text_content)
@@ -751,9 +835,29 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         if template is None:
             return
             
+        is_sparcl = 'SpecSparcl' in globals() and isinstance(self.spec, SpecSparcl)
         z = self.spec.z_vi
         wave_shifted = template['wave'] * (1 + z)
         flux_template = template['flux']
+
+        if is_sparcl:
+            wave_full = self.spec.wave.value if hasattr(self.spec.wave, 'value') else self.spec.wave
+            flux_full = self.spec.flux.value if hasattr(self.spec.flux, 'value') else self.spec.flux
+            finite = np.isfinite(wave_full) & np.isfinite(flux_full)
+            in_range = (wave_full >= 3800) & (wave_full <= 9300)
+            finite_in_range = finite & in_range
+            if np.any(finite_in_range):
+                wmin = float(np.nanmin(wave_full[finite_in_range]))
+                wmax = float(np.nanmax(wave_full[finite_in_range]))
+            elif np.any(finite):
+                wmin = float(np.nanmin(wave_full[finite]))
+                wmax = float(np.nanmax(wave_full[finite]))
+            else:
+                wmin = float(np.nanmin(wave_full))
+                wmax = float(np.nanmax(wave_full))
+            idx = (wave_shifted >= wmin) & (wave_shifted <= wmax)
+            wave_shifted = wave_shifted[idx]
+            flux_template = flux_template[idx]
         
         # Scale template like in original code (unclipped on both sides as requested)
         if hasattr(self, 'flux') and len(self.flux) > 0:
@@ -765,13 +869,59 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             flux_scaled = flux_template / np.mean(flux_template) * np.abs(np.nanmean(spec_flux)) * 1.5
         
         # Plot template unclipped (full wavelength range)
-        self.plot(wave_shifted, flux_scaled, pen=(240, 128, 128), symbol='+',
-                  symbolSize=2, symbolPen=None)
+        self.plot(wave_shifted, flux_scaled, pen=pg.mkPen('r', width=2), antialias=True)
+        if hasattr(self, 'wave') and self.wave is not None and len(self.wave) > 0:
+            self._label_template_emission_lines(
+                wmin=float(np.nanmin(self.wave)),
+                wmax=float(np.nanmax(self.wave)),
+                z=z,
+            )
         
         # Update info label to reflect new redshift
         self.update_spectrum_info_label()
         
         # Do NOT auto-range during template updates - preserves x-axis range
+
+    def _label_template_emission_lines(self, *, wmin, wmax, z):
+        """Overlay emission-line markers for the template within [wmin, wmax]."""
+        if not np.isfinite(wmin) or not np.isfinite(wmax) or wmax <= wmin:
+            return
+        try:
+            z = float(z)
+        except Exception:
+            return
+        if not np.isfinite(z) or z < 0:
+            return
+
+        # Use current (cleaned) spectrum flux to place labels near the top.
+        y_ref = None
+        if hasattr(self, 'flux') and self.flux is not None and len(self.flux) > 0:
+            try:
+                y_ref = float(np.nanmax(self.flux))
+            except Exception:
+                y_ref = None
+        if y_ref is None or not np.isfinite(y_ref):
+            y_ref = 0.0
+        y_base = y_ref * 0.92 if y_ref != 0 else 0.0
+
+        pen = pg.mkPen((140, 140, 140), width=2, style=Qt.DashLine)
+        text_color = (80, 80, 80)
+
+        lines = _TEMPLATE_EMISSION_LINES
+
+        # Stagger labels to reduce overlap.
+        y_offsets = [0.0, 0.06, 0.12]
+        k = 0
+        for name, rest_aa in lines:
+            x = rest_aa * (1.0 + z)
+            if x < wmin or x > wmax:
+                continue
+            self.addItem(pg.InfiniteLine(pos=x, angle=90, pen=pen, movable=False))
+            y = y_base * (1.0 - y_offsets[k % len(y_offsets)]) if y_base != 0 else 0.0
+            label = pg.TextItem(text=str(name), color=text_color, anchor=(0.5, 1.0))
+            label.setPos(x, y)
+            self.addItem(label)
+            k += 1
 
     def plot_next(self):
         """Plot next spectrum."""
@@ -978,6 +1128,27 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
 class PGSpecPlotAppEnhanced(QApplication):
     """Enhanced standalone application with image cutouts and template switching."""
 
+    @staticmethod
+    def _normalize_objid(value):
+        """Normalize objid loaded from CSV.
+
+        Keeps integers as int (for legacy FITS workflows) and keeps non-numeric
+        IDs (e.g. SPARCL UUIDs) as str.
+        """
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return value
+        if isinstance(value, (np.integer, int)):
+            return int(value)
+        if isinstance(value, (np.floating, float)):
+            if float(value).is_integer():
+                return int(value)
+            return str(value)
+        s = str(value)
+        try:
+            return int(s)
+        except Exception:
+            return s
+
     def __init__(self, spectra, SpecClass=SpecEuclid1d,
                  output_file='vi_output.csv', z_max=5.0, load_history=False):
         super().__init__(sys.argv)
@@ -992,7 +1163,8 @@ class PGSpecPlotAppEnhanced(QApplication):
                 df.rename(columns={'vi_class': 'class_vi'}, inplace=True)
             history_dict = {}
             for _, row in df.iterrows():
-                history_dict[int(row['objid'])] = [row['objname'], row['ra'],
+                objid = self._normalize_objid(row['objid'])
+                history_dict[objid] = [row['objname'], row['ra'],
                                                   row['dec'], row['class_vi'],
                                                   row['z_vi']]
             initial_counter = df.shape[0]

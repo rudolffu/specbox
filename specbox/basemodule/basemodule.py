@@ -2,6 +2,7 @@
 from astropy.io import fits
 import numpy as np
 import pandas as pd
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Union
 from glob import glob
 import re
 import matplotlib.pyplot as plt
@@ -308,6 +309,276 @@ class SpecIOMixin():
     def write(self, filename, **kwargs):
         hdu = fits.PrimaryHDU(self.data, header=self.hdr)
         hdu.writeto(filename, overwrite=True)
+
+
+class SpecPandasRow(ConvenientSpecMixin):
+    """Spectrum backed by a single row of a pandas DataFrame.
+
+    This class is meant for "table-of-spectra" files where each row stores
+    arrays (e.g. wavelength/flux/ivar) plus scalar metadata (e.g. ra/dec/z).
+
+    Notes
+    -----
+    - ``ext`` is treated as a 1-based row selector for compatibility with the
+      FITS multi-extension viewer (which uses ``ext=index+1``).
+    - Parquet reading requires either ``pyarrow`` or ``fastparquet`` installed.
+    """
+
+    _DATAFRAME_CACHE: Dict[str, pd.DataFrame] = {}
+
+    def __init__(
+        self,
+        filename: Optional[Union[str, Path]] = None,
+        *args,
+        df: Optional[pd.DataFrame] = None,
+        ext: int = 1,
+        row: Optional[int] = None,
+        file_format: Optional[str] = None,
+        pandas_read_kwargs: Optional[Mapping[str, Any]] = None,
+        wave_col: str = "wavelength",
+        flux_col: str = "flux",
+        err_col: Optional[str] = None,
+        ivar_col: Optional[str] = "ivar",
+        wave_unit: Optional[u.Unit] = u.Angstrom,
+        flux_unit: Optional[u.Unit] = u.dimensionless_unscaled,
+        meta_cols: Sequence[str] = (),
+        array_cols: Mapping[str, str] = (),
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        if wave_unit is not None:
+            self.wave_unit = wave_unit
+        if flux_unit is not None:
+            self.flux_unit = flux_unit
+        self.wave = kwargs.get("wave", None)
+        self.flux = kwargs.get("flux", None)
+        self.err = kwargs.get("err", None)
+
+        self._wave_col = wave_col
+        self._flux_col = flux_col
+        self._err_col = err_col
+        self._ivar_col = ivar_col
+        self._meta_cols = list(meta_cols)
+        self._array_cols = dict(array_cols)
+        self._file_format = file_format
+        self._pandas_read_kwargs = dict(pandas_read_kwargs or {})
+
+        if df is not None:
+            self.df = df
+        else:
+            self.df = None
+
+        if filename is not None or df is not None:
+            self.read(filename=filename, df=df, ext=ext, row=row)
+
+    @classmethod
+    def _read_dataframe_file(
+        cls,
+        filename: Union[str, Path],
+        *,
+        file_format: Optional[str] = None,
+        pandas_read_kwargs: Optional[Mapping[str, Any]] = None,
+    ) -> pd.DataFrame:
+        path = str(filename)
+        if path in cls._DATAFRAME_CACHE:
+            return cls._DATAFRAME_CACHE[path]
+
+        kwargs = dict(pandas_read_kwargs or {})
+        fmt = (file_format or Path(path).suffix.lstrip(".")).lower()
+        try:
+            if fmt in ("parquet", "pq"):
+                df = pd.read_parquet(path, **kwargs)
+            elif fmt in ("csv",):
+                df = pd.read_csv(path, **kwargs)
+            elif fmt in ("tsv", "tab"):
+                kwargs.setdefault("sep", "\t")
+                df = pd.read_csv(path, **kwargs)
+            elif fmt in ("feather",):
+                df = pd.read_feather(path, **kwargs)
+            elif fmt in ("json",):
+                df = pd.read_json(path, **kwargs)
+            elif fmt in ("pickle", "pkl"):
+                df = pd.read_pickle(path, **kwargs)
+            else:
+                raise ValueError(
+                    f"Unsupported dataframe format '{fmt}'. "
+                    "Pass file_format explicitly or load a DataFrame and pass df=..."
+                )
+        except ImportError as e:
+            raise ImportError(
+                f"Failed to read '{path}' via pandas. For parquet, install 'pyarrow' "
+                "or 'fastparquet'."
+            ) from e
+
+        cls._DATAFRAME_CACHE[path] = df
+        return df
+
+    @classmethod
+    def count_in_file(
+        cls,
+        filename: Union[str, Path],
+        *,
+        file_format: Optional[str] = None,
+        pandas_read_kwargs: Optional[Mapping[str, Any]] = None,
+    ) -> int:
+        df = cls._read_dataframe_file(
+            filename, file_format=file_format, pandas_read_kwargs=pandas_read_kwargs
+        )
+        return int(len(df))
+
+    def _row_index(self, *, ext: int, row: Optional[int]) -> int:
+        if row is not None:
+            return int(row)
+        if ext is None:
+            return 0
+        if int(ext) < 1:
+            raise ValueError(f"ext must be >= 1 (got {ext})")
+        return int(ext) - 1
+
+    def read(
+        self,
+        filename: Optional[Union[str, Path]] = None,
+        *,
+        df: Optional[pd.DataFrame] = None,
+        ext: int = 1,
+        row: Optional[int] = None,
+        file_format: Optional[str] = None,
+        pandas_read_kwargs: Optional[Mapping[str, Any]] = None,
+        wave_col: Optional[str] = None,
+        flux_col: Optional[str] = None,
+        err_col: Optional[str] = None,
+        ivar_col: Optional[str] = None,
+        meta_cols: Optional[Sequence[str]] = None,
+        array_cols: Optional[Mapping[str, str]] = None,
+        **kwargs,
+    ):
+        self.filename = str(filename) if filename is not None else None
+
+        if df is None:
+            if filename is None:
+                raise ValueError("Either filename or df must be provided.")
+            df = self._read_dataframe_file(
+                filename,
+                file_format=file_format or self._file_format,
+                pandas_read_kwargs=pandas_read_kwargs or self._pandas_read_kwargs,
+            )
+        self.df = df
+
+        wave_col = wave_col or self._wave_col
+        flux_col = flux_col or self._flux_col
+        err_col = err_col if err_col is not None else self._err_col
+        ivar_col = ivar_col if ivar_col is not None else self._ivar_col
+        meta_cols = list(meta_cols) if meta_cols is not None else self._meta_cols
+        array_cols = dict(array_cols) if array_cols is not None else self._array_cols
+
+        idx = self._row_index(ext=ext, row=row)
+        if idx < 0 or idx >= len(df):
+            raise IndexError(f"Row index {idx} out of range for dataframe length {len(df)}")
+
+        r = df.iloc[idx]
+
+        wave = np.asarray(r[wave_col], dtype=float)
+        flux = np.asarray(r[flux_col], dtype=float)
+        if wave.ndim != 1 or flux.ndim != 1:
+            raise ValueError("wave and flux must be 1D arrays in the dataframe row.")
+        if wave.shape[0] != flux.shape[0]:
+            raise ValueError(
+                f"wave and flux length mismatch: {wave.shape[0]} vs {flux.shape[0]}"
+            )
+
+        if err_col is not None and err_col in df.columns:
+            err = np.asarray(r[err_col], dtype=float)
+        elif ivar_col is not None and ivar_col in df.columns:
+            ivar = np.asarray(r[ivar_col], dtype=float)
+            ivar = np.where(ivar > 0, ivar, np.nan)
+            err = np.sqrt(1.0 / ivar)
+            err = np.where(np.isfinite(err), err, np.inf)
+        else:
+            err = np.zeros_like(flux, dtype=float)
+
+        self.wave = wave * self.wave_unit
+        self.flux = flux * self.flux_unit
+        self.err = err
+        self.spec = Spectrum(
+            spectral_axis=self.wave,
+            flux=self.flux,
+            uncertainty=StdDevUncertainty(self.err),
+        )
+
+        for col in meta_cols:
+            if col in df.columns:
+                try:
+                    setattr(self, col, r[col].item() if hasattr(r[col], "item") else r[col])
+                except Exception:
+                    setattr(self, col, r[col])
+
+        for attr, col in array_cols.items():
+            if col in df.columns:
+                setattr(self, attr, np.asarray(r[col]))
+
+        self._row = idx
+        return self
+
+
+class SpecSparcl(SpecPandasRow):
+    """Reader for SPARCL spectra stored as a dataframe (e.g. parquet).
+
+    The reference schema used by ``outlier_sparcl_spectra.parquet`` is:
+    - arrays: ``wavelength``, ``flux``, ``ivar`` (+ optional ``mask``, ``model``)
+    - scalars: ``ra``, ``dec``, ``redshift``, ``specid``, ``spectype``, ...
+    """
+
+    def __init__(
+        self,
+        filename: Optional[Union[str, Path]] = None,
+        *args,
+        df: Optional[pd.DataFrame] = None,
+        ext: int = 1,
+        row: Optional[int] = None,
+        file_format: Optional[str] = None,
+        pandas_read_kwargs: Optional[Mapping[str, Any]] = None,
+        wave_unit: Optional[u.Unit] = u.Angstrom,
+        flux_unit: Optional[u.Unit] = 1e-17 * u.erg / u.s / u.cm**2 / u.Angstrom,
+        **kwargs,
+    ):
+        super().__init__(
+            filename=filename,
+            df=df,
+            ext=ext,
+            row=row,
+            file_format=file_format,
+            pandas_read_kwargs=pandas_read_kwargs,
+            wave_col="wavelength",
+            flux_col="flux",
+            ivar_col="ivar",
+            err_col=None,
+            wave_unit=wave_unit,
+            flux_unit=flux_unit,
+            meta_cols=(
+                "ra",
+                "dec",
+                "redshift",
+                "specid",
+                "spectype",
+                "data_release",
+                "sparcl_id",
+                "_dr",
+            ),
+            array_cols={"mask": "mask", "model": "model"},
+            *args,
+            **kwargs,
+        )
+
+        if not hasattr(self, "objname"):
+            if hasattr(self, "ra") and hasattr(self, "dec"):
+                try:
+                    self.objname = designation(self.ra, self.dec)
+                except Exception:
+                    self.objname = "Unknown"
+            else:
+                self.objname = "Unknown"
+        if not hasattr(self, "objid"):
+            self.objid = getattr(self, "sparcl_id", getattr(self, "specid", getattr(self, "_row", 0)))
 
 
 class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):

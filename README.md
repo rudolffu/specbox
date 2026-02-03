@@ -11,6 +11,7 @@ A simple tool to manipulate and visualize optical spectra for astronomical resea
 - [`specutils`](https://specutils.readthedocs.io/en/stable/installation.html)
 - `matplotlib`
 - `pandas`
+- `pyarrow` or `fastparquet` (optional, for reading parquet spectra tables)
 - `requests`
 - `pillow` (PIL)
 - `astroquery`
@@ -30,6 +31,8 @@ The main classes and functions of specbox are:
 #### `basemodule.py`:
 - `SpecLAMOST` and `SpecSDSS`: classes to read and manipulate spectra from the LAMOST and SDSS surveys, respectively.
 - `SpecIRAF`: class to read and manipulate spectra from the IRAF format.
+- `SpecPandasRow`: generic reader for "table-of-spectra" files readable by pandas (parquet/csv/feather/...), where each row stores arrays (e.g. wavelength/flux/ivar).
+- `SpecSparcl`: SPARCL parquet/table reader (e.g., for file `sparcl_spectra.parquet`).
 #### `qtmodule.py`:
 - `PGSpecPlot`: class to plot spectra in a `pyqtgraph` plot.
 - `PGSpecPlotApp`: class to create a `pyqtgraph` plot with a `QApplication` instance.
@@ -46,6 +49,15 @@ spec.plot()
 spec.smooth(5, 3, inplace=False)
 ```
 
+#### Reading a SPARCL parquet spectra table (one row per spectrum)
+```python
+from specbox.basemodule import SpecSparcl
+
+# ext is a 1-based row index (ext=1 -> first row)
+sp1 = SpecSparcl("sparcl_spectra.parquet", ext=1)
+sp1.plot()
+```
+
 #### Run a `PGSpecPlotThread` for visual inspection of a list of spectra
 ```python
 from specbox import SpecLAMOST
@@ -59,5 +71,20 @@ flist = flist[0:60]
 
 a = PGSpecPlotThread(speclist=flist, SpecClass=SpecLAMOST, output_file='vi_output_test60.csv')
 a.run()
+```
+
+#### Run a viewer over a multi-row parquet file (SPARCL/table-of-spectra)
+```python
+from specbox.basemodule import SpecSparcl
+from specbox.qtmodule import PGSpecPlotThreadEnhanced
+
+viewer = PGSpecPlotThreadEnhanced(
+    spectra="sparcl_spectra.parquet",
+    SpecClass=SpecSparcl,
+    output_file="sparcl_vi_results.csv",
+    z_max=6.0,
+    load_history=True,
+)
+viewer.run()
 ```
 <img src="specbox/docs/figs/PGSpecPlotThread_example.jpg" width="600">

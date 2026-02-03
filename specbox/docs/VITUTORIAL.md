@@ -88,6 +88,35 @@ plt.show()
 
 If the installation is successful, you should see a plot of the spectrum.
 
+### Reading SPARCL parquet spectra (dataframe-backed)
+
+If your spectra are stored in a table file (e.g. parquet) where each row is a spectrum and the row contains array columns like ``wavelength``, ``flux``, and ``ivar``, you can use ``SpecSparcl``:
+
+```python
+from specbox.basemodule import SpecSparcl
+
+sp1 = SpecSparcl('outlier_sparcl_spectra.parquet', ext=1)  # ext is 1-based row index
+sp1.plot()
+```
+
+Parquet input requires either ``pyarrow`` or ``fastparquet`` to be installed.
+
+To run the visual inspection GUI directly on such a multi-row parquet file:
+
+```python
+from specbox.basemodule import SpecSparcl
+from specbox.qtmodule import PGSpecPlotThreadEnhanced
+
+viewer = PGSpecPlotThreadEnhanced(
+    spectra='outlier_sparcl_spectra.parquet',
+    SpecClass=SpecSparcl,
+    output_file='sparcl_vi_results.csv',
+    z_max=6.0,
+    load_history=True,
+)
+viewer.run()
+```
+
 ### Running the Visual Inspection Tool
 
 You can run the tool by creating an instance of the inspection thread. For example, create a Python script (`my_vi_script.py`) with the following code:

@@ -45,8 +45,11 @@ class PGSpecPlot(pg.PlotWidget):
             self.len_list = len(self.speclist)
         else:
             self.specfile = spectra
-            with fits.open(spectra) as hdul:
-                self.len_list = len(hdul) - 1
+            if hasattr(SpecClass, "count_in_file"):
+                self.len_list = int(SpecClass.count_in_file(spectra))
+            else:
+                with fits.open(spectra) as hdul:
+                    self.len_list = len(hdul) - 1
             self.speclist = None
 
         if initial_counter >= self.len_list:
@@ -394,6 +397,27 @@ class PGSpecPlot(pg.PlotWidget):
 class PGSpecPlotApp(QApplication):
     """Standalone application running :class:`PGSpecPlot`."""
 
+    @staticmethod
+    def _normalize_objid(value):
+        """Normalize objid loaded from CSV.
+
+        Keeps integers as int (for legacy FITS workflows) and keeps non-numeric
+        IDs (e.g. SPARCL UUIDs) as str.
+        """
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return value
+        if isinstance(value, (np.integer, int)):
+            return int(value)
+        if isinstance(value, (np.floating, float)):
+            if float(value).is_integer():
+                return int(value)
+            return str(value)
+        s = str(value)
+        try:
+            return int(s)
+        except Exception:
+            return s
+
     def __init__(self, spectra, SpecClass=SpecEuclid1d,
                  output_file='vi_output.csv', z_max=5.0, load_history=False):
         super().__init__(sys.argv)
@@ -408,7 +432,8 @@ class PGSpecPlotApp(QApplication):
                 df.rename(columns={'vi_class': 'class_vi'}, inplace=True)
             history_dict = {}
             for _, row in df.iterrows():
-                history_dict[int(row['objid'])] = [row['objname'], row['ra'],
+                objid = self._normalize_objid(row['objid'])
+                history_dict[objid] = [row['objname'], row['ra'],
                                                   row['dec'], row['class_vi'],
                                                   row['z_vi']]
             initial_counter = df.shape[0]
@@ -498,4 +523,3 @@ class PGSpecPlotThread(QThread):
     def run(self):
         exit_code = self.app.exec_()
         sys.exit(exit_code)
-
