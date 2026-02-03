@@ -1289,6 +1289,11 @@ class PGSpecPlotAppEnhanced(QApplication):
             toolbar_layout.addStretch()
             
             # Save buttons
+            self.save_png_btn = QPushButton("Save PNG")
+            self.save_png_btn.clicked.connect(self.save_png)
+            self.save_png_btn.setMaximumHeight(35)
+            toolbar_layout.addWidget(self.save_png_btn)
+
             self.save_btn = QPushButton("Save")
             self.save_btn.clicked.connect(self.save_data)
             self.save_btn.setMaximumHeight(35)  # Make button more compact
@@ -1369,6 +1374,39 @@ class PGSpecPlotAppEnhanced(QApplication):
         """Save current data to CSV."""
         self.save_dict_todf()
         QMessageBox.information(self.layout, "Saved", f"Data saved to {self.output_file}")
+
+    def save_png(self):
+        """Save the entire application window as a PNG image."""
+        objid = getattr(self.plot.spec, "objid", "spectrum") if hasattr(self.plot, "spec") else "spectrum"
+        objid_str = str(objid).replace(os.sep, "_").replace(" ", "_")
+        default_name = f"{objid_str}.png"
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self.layout,
+            "Save window as PNG",
+            default_name,
+            "PNG Files (*.png)",
+        )
+        if not filename:
+            return
+        if not filename.lower().endswith(".png"):
+            filename += ".png"
+
+        try:
+            # Ensure latest visuals are painted before grabbing.
+            self.layout.repaint()
+            QApplication.processEvents()
+            pixmap = self.layout.grab()
+            ok = pixmap.save(filename, "PNG")
+        except Exception as e:
+            QMessageBox.warning(self.layout, "Save PNG failed", str(e))
+            return
+
+        if not ok:
+            QMessageBox.warning(self.layout, "Save PNG failed", "Qt failed to write the PNG file.")
+            return
+
+        QMessageBox.information(self.layout, "Saved", f"Saved PNG to {filename}")
 
     def save_and_quit(self):
         """Save data and quit application."""
