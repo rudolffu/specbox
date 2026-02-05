@@ -26,6 +26,7 @@ import io
 import json
 import hashlib
 from scipy.signal import savgol_filter
+import re
 from astroquery.hips2fits import hips2fits
 from astropy.coordinates import Longitude, Latitude, Angle
 import concurrent.futures
@@ -863,6 +864,10 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         if message:
             parts.append(message)
         parts.append(f"ID: {objid}")
+        if 'SpecSparcl' in globals() and isinstance(spec, SpecSparcl):
+            targetid = getattr(spec, 'targetid', None)
+            if targetid not in (None, "", 0):
+                parts.append(f"targetid: {targetid}")
         parts.append(_fmt_z("z_vi", z_vi, hide_zero=False) or "z_vi = -")
 
         if 'SpecSparcl' in globals() and isinstance(spec, SpecSparcl):
@@ -1083,13 +1088,22 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
     def keyPressEvent(self, event):
         """Handle keyboard events."""
         spec = self.spec
+
+        def _history_payload(class_vi, z_vi):
+            targetid = getattr(spec, 'targetid', None)
+            data_release = getattr(spec, 'data_release', None)
+            return [spec.objname, spec.ra, spec.dec, class_vi, z_vi, targetid, data_release]
+
         if event.key() == Qt.Key_Q:
             if spec.objid not in self.history:
-                self.history[spec.objid] = [spec.objname, spec.ra, spec.dec,
-                                            'QSO(Default)', spec.z_vi]
+                self.history[spec.objid] = _history_payload('QSO(Default)', spec.z_vi)
             else:
                 # Update existing entry with current z_vi (preserves classification but updates redshift)
                 self.history[spec.objid][4] = spec.z_vi
+                if len(self.history[spec.objid]) < 7:
+                    self.history[spec.objid].extend([None] * (7 - len(self.history[spec.objid])))
+                self.history[spec.objid][5] = self.history[spec.objid][5] if self.history[spec.objid][5] is not None else getattr(spec, 'targetid', None)
+                self.history[spec.objid][6] = self.history[spec.objid][6] if self.history[spec.objid][6] is not None else getattr(spec, 'data_release', None)
             if self.counter < self.len_list:
                 self.clear()
                 self.plot_next()
@@ -1099,34 +1113,42 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             if (self.counter-1) % 50 == 0:
                 print("Saving temp file to csv (n={})...".format(self.counter))
                 temp_filename = f"vi_temp_{self.counter-1}.csv"
-                df_new = pd.DataFrame.from_dict(self.history, orient='index')
-                df_new.reset_index(inplace=True)
-                df_new.rename(columns={'index': 'objid', 0: 'objname', 1: 'ra',
-                                        2: 'dec', 3: 'class_vi', 4: 'z_vi'},
-                               inplace=True)
-                df_new = df_new[['objid', 'objname', 'ra', 'dec', 'class_vi', 'z_vi']]
+                rows = []
+                for objid_key, v in self.history.items():
+                    if len(v) < 5:
+                        continue
+                    targetid = v[5] if len(v) > 5 else None
+                    data_release = v[6] if len(v) > 6 else None
+                    rows.append(
+                        {
+                            "objid": objid_key,
+                            "objname": v[0],
+                            "ra": v[1],
+                            "dec": v[2],
+                            "class_vi": v[3],
+                            "z_vi": v[4],
+                            "targetid": targetid,
+                            "data_release": data_release,
+                        }
+                    )
+                df_new = pd.DataFrame(rows)
                 df_new.to_csv(temp_filename, index=False)
                 
         elif event.key() == Qt.Key_S:
             print("\tClass: STAR.")
-            self.history[spec.objid] = [spec.objname, spec.ra, spec.dec,
-                                        'STAR', 0.0]
+            self.history[spec.objid] = _history_payload('STAR', 0.0)
         elif event.key() == Qt.Key_G:
             print("\tClass: GALAXY.")
-            self.history[spec.objid] = [spec.objname, spec.ra, spec.dec,
-                                        'GALAXY', spec.z_vi]
+            self.history[spec.objid] = _history_payload('GALAXY', spec.z_vi)
         elif event.key() == Qt.Key_A:
             print("\tClass: QSO(AGN).")
-            self.history[spec.objid] = [spec.objname, spec.ra, spec.dec,
-                                        'QSO', spec.z_vi]
+            self.history[spec.objid] = _history_payload('QSO', spec.z_vi)
         elif event.key() == Qt.Key_U:
             print("\tClass: UNKNOWN.")
-            self.history[spec.objid] = [spec.objname, spec.ra, spec.dec,
-                                        'UNKNOWN', 0.0]
+            self.history[spec.objid] = _history_payload('UNKNOWN', 0.0)
         elif event.key() == Qt.Key_L:
             print("\tClass: LIKELY/Unusual QSO.")
-            self.history[spec.objid] = [spec.objname, spec.ra, spec.dec,
-                                        'LIKELY', spec.z_vi]
+            self.history[spec.objid] = _history_payload('LIKELY', spec.z_vi)
         if event.key() == Qt.Key_R:
             self.clear()
             self.plot_single()
@@ -1247,9 +1269,17 @@ class PGSpecPlotAppEnhanced(QApplication):
             history_dict = {}
             for _, row in df.iterrows():
                 objid = self._normalize_objid(row['objid'])
-                history_dict[objid] = [row['objname'], row['ra'],
-                                                  row['dec'], row['class_vi'],
-                                                  row['z_vi']]
+                targetid = row['targetid'] if 'targetid' in df.columns else None
+                data_release = row['data_release'] if 'data_release' in df.columns else None
+                history_dict[objid] = [
+                    row.get('objname', 'Unknown'),
+                    row.get('ra', np.nan),
+                    row.get('dec', np.nan),
+                    row.get('class_vi', ''),
+                    row.get('z_vi', np.nan),
+                    targetid,
+                    data_release,
+                ]
             initial_counter = df.shape[0]
         else:
             history_dict = {}
@@ -1461,12 +1491,43 @@ class PGSpecPlotAppEnhanced(QApplication):
 
     def save_png(self):
         """Save the entire application window as a PNG image."""
-        objid = (
-            getattr(self.plot.spec, "objid", "spectrum")
-            if hasattr(self.plot, "spec")
-            else "spectrum"
-        )
-        objid_str = str(objid).replace(os.sep, "_").replace(" ", "_")
+        def _sanitize_component(value):
+            s = str(value).strip()
+            s = s.replace(os.sep, "_").replace(" ", "_")
+            s = re.sub(r"[^0-9A-Za-z_.-]+", "_", s)
+            return s.strip("_") or "unknown"
+
+        def _infer_survey(spec):
+            dr = str(getattr(spec, "data_release", "") or getattr(spec, "_dr", "") or "")
+            dr_l = dr.lower()
+            if "desi" in dr_l:
+                return "desi"
+            if "sdss" in dr_l or "boss" in dr_l or "eboss" in dr_l:
+                return "sdss"
+            if "lamost" in dr_l:
+                return "lamost"
+            if "gaia" in dr_l:
+                return "gaia"
+            if dr_l:
+                # keep it short and filesystem-friendly
+                return _sanitize_component(dr_l)[:24]
+            return "sparcl"
+
+        spec = self.plot.spec if hasattr(self.plot, "spec") else None
+        objid = getattr(spec, "objid", "spectrum") if spec is not None else "spectrum"
+        objid_str = _sanitize_component(objid)
+
+        if spec is not None and getattr(spec, "telescope", "").lower() == "euclid":
+            base_name = f"euclid_{objid_str}_vi.png"
+        elif "SpecSparcl" in globals() and spec is not None and isinstance(spec, SpecSparcl):
+            survey = _infer_survey(spec)
+            targetid = getattr(spec, "targetid", None)
+            if targetid not in (None, "", 0):
+                base_name = f"{survey}_{_sanitize_component(targetid)}_vi.png"
+            else:
+                base_name = f"{survey}_{objid_str}_vi.png"
+        else:
+            base_name = f"{objid_str}_vi.png"
 
         out_dir = Path.cwd() / "saved_pngs"
         try:
@@ -1475,11 +1536,12 @@ class PGSpecPlotAppEnhanced(QApplication):
             QMessageBox.warning(self.layout, "Save PNG failed", f"Could not create {out_dir}: {e}")
             return
 
-        filename = out_dir / f"{objid_str}.png"
+        filename = out_dir / base_name
         if filename.exists():
             i = 2
             while True:
-                candidate = out_dir / f"{objid_str}_{i}.png"
+                stem = filename.stem
+                candidate = out_dir / f"{stem}_{i}.png"
                 if not candidate.exists():
                     filename = candidate
                     break
@@ -1533,12 +1595,26 @@ class PGSpecPlotAppEnhanced(QApplication):
         """Save classification results to CSV."""
         if not self.plot.history:
             return
-            
-        df_new = pd.DataFrame.from_dict(self.plot.history, orient='index')
-        df_new.reset_index(inplace=True)
-        df_new.rename(columns={'index': 'objid', 0: 'objname', 1: 'ra',
-                               2: 'dec', 3: 'class_vi', 4: 'z_vi'},
-                      inplace=True)
+
+        rows = []
+        for objid_key, v in self.plot.history.items():
+            if len(v) < 5:
+                continue
+            targetid = v[5] if len(v) > 5 else None
+            data_release = v[6] if len(v) > 6 else None
+            rows.append(
+                {
+                    "objid": objid_key,
+                    "objname": v[0],
+                    "ra": v[1],
+                    "dec": v[2],
+                    "class_vi": v[3],
+                    "z_vi": v[4],
+                    "targetid": targetid,
+                    "data_release": data_release,
+                }
+            )
+        df_new = pd.DataFrame(rows)
         df_new.to_csv(self.output_file, index=False)
         print(f"Results saved to {self.output_file}")
 

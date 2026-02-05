@@ -559,6 +559,7 @@ class SpecSparcl(SpecPandasRow):
                 "dec",
                 "redshift",
                 "specid",
+                "targetid",
                 "spectype",
                 "data_release",
                 "sparcl_id",
