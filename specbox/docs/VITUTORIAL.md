@@ -110,12 +110,19 @@ from specbox.qtmodule import PGSpecPlotThreadEnhanced
 viewer = PGSpecPlotThreadEnhanced(
     spectra='outlier_sparcl_spectra.parquet',
     SpecClass=SpecSparcl,
+    # Optional: overlay Euclid spectrum when the parquet has `euclid_object_id`
+    # and the Euclid combined FITS uses that ID as `EXTNAME`.
+    euclid_fits='COMBINED_EUCLID_SPECS.fits',
     output_file='sparcl_vi_results.csv',
     z_max=6.0,
     load_history=True,
 )
 viewer.run()
 ```
+
+Notes:
+- The results CSV includes `targetid` and `data_release` when present in the input table.
+- Use the `Save PNG` button to save a screenshot to `./saved_pngs/`.
 
 ### Running the Visual Inspection Tool
 

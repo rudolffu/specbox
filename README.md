@@ -32,7 +32,7 @@ The main classes and functions of specbox are:
 - `SpecLAMOST` and `SpecSDSS`: classes to read and manipulate spectra from the LAMOST and SDSS surveys, respectively.
 - `SpecIRAF`: class to read and manipulate spectra from the IRAF format.
 - `SpecPandasRow`: generic reader for "table-of-spectra" files readable by pandas (parquet/csv/feather/...), where each row stores arrays (e.g. wavelength/flux/ivar).
-- `SpecSparcl`: SPARCL parquet/table reader (e.g., for file `sparcl_spectra.parquet`).
+- `SpecSparcl`: SPARCL parquet/table reader (e.g., for file `sparcl_spectra.parquet`). Common metadata columns include `data_release`, `targetid`, and (optional) `euclid_object_id` for Euclid overlay.
 #### `qtmodule.py`:
 - `PGSpecPlot`: class to plot spectra in a `pyqtgraph` plot.
 - `PGSpecPlotApp`: class to create a `pyqtgraph` plot with a `QApplication` instance.
@@ -81,10 +81,17 @@ from specbox.qtmodule import PGSpecPlotThreadEnhanced
 viewer = PGSpecPlotThreadEnhanced(
     spectra="sparcl_spectra.parquet",
     SpecClass=SpecSparcl,
+    # Optional: overlay Euclid spectrum when the parquet has `euclid_object_id`
+    # and the Euclid combined FITS uses that ID as `EXTNAME`.
+    euclid_fits="COMBINED_EUCLID_SPECS.fits",
     output_file="sparcl_vi_results.csv",
     z_max=6.0,
     load_history=True,
 )
 viewer.run()
 ```
+
+Notes:
+- Results CSV includes `targetid` and `data_release` (when available from the input table).
+- The enhanced viewer has a `Save PNG` button that writes screenshots to `./saved_pngs/`.
 <img src="specbox/docs/figs/PGSpecPlotThread_example.jpg" width="600">
