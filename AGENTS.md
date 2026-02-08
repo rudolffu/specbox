@@ -2,7 +2,7 @@
 
 ## Repository Info
 - Name: `specbox`
-- Description: A simple tool to manipulate and visualize optical spectra for astronomical research.
+- Description: A simple tool to manipulate and visualize UV/optical/NIR spectra for astronomical research.
 - Author: Yuming Fu
 - URL: https://github.com/rudolffu/specbox
 - Email: fuympku@outlook.com

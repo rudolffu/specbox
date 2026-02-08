@@ -9,12 +9,11 @@ repository-code: "https://github.com/rudolffu/specbox"
 url: "https://specbox.readthedocs.io/en/latest/index.html"
 license: "GPL-3.0-only"
 version: "1.0.0.dev0"
-abstract: "A simple tool to manipulate and visualize optical spectra for astronomical research."
+abstract: "A simple tool to manipulate and visualize UV/optical/NIR spectra for astronomical research."
 keywords:
   - astronomy
   - spectroscopy
-  - optical spectra
+  - UV/optical/NIR spectra
   - quasar
   - LAMOST
   - SDSS
-

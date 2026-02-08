@@ -3,7 +3,7 @@
 <!-- After the first Zenodo archive is created, replace ZENODO_DOI with the DOI string. -->
 <!-- [![DOI](https://zenodo.org/badge/DOI/ZENODO_DOI.svg)](https://doi.org/ZENODO_DOI) -->
 
-A simple tool to manipulate and visualize optical spectra for astronomical research.
+A simple tool to manipulate and visualize UV/optical/NIR spectra for astronomical research.
 
 ## Documentation
 Online documentation is hosted on Read the Docs: https://specbox.readthedocs.io/en/latest/index.html

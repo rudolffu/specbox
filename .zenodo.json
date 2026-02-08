@@ -1,6 +1,6 @@
 {
   "title": "specbox",
-  "description": "A simple tool to manipulate and visualize optical spectra for astronomical research.",
+  "description": "A simple tool to manipulate and visualize UV/optical/NIR spectra for astronomical research.",
   "upload_type": "software",
   "license": "GPL-3.0-only",
   "creators": [
@@ -12,7 +12,7 @@
   "keywords": [
     "astronomy",
     "spectroscopy",
-    "optical spectra",
+    "UV/optical/NIR spectra",
     "quasar",
     "LAMOST",
     "SDSS"
@@ -30,4 +30,3 @@
     }
   ]
 }
-

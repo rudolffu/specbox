@@ -15,7 +15,7 @@ api/index
 
 ## Overview
 
-`specbox` is a small toolkit to read, manipulate, and visually inspect optical spectra
+`specbox` is a small toolkit to read, manipulate, and visually inspect UV/optical/NIR spectra
 from multiple surveys and file formats.
 
 GitHub repository: https://github.com/rudolffu/specbox
