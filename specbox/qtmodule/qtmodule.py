@@ -10,6 +10,7 @@ from astropy.io import fits
 from astropy.stats import sigma_clip
 import pandas as pd
 from importlib.resources import files
+from importlib.metadata import PackageNotFoundError, version as dist_version
 from pathlib import Path
 import os
 
@@ -18,7 +19,10 @@ data_path = Path(files("specbox").joinpath("data"))
 fits_file = data_path / "optical_nir_qso_template_v1.fits"
 tb_temp = Table.read(str(fits_file))
 tb_temp.rename_columns(['wavelength', 'flux'], ['Wave', 'Flux'])
-viewer_version = '1.2.1'
+try:
+    viewer_version = dist_version("specbox")
+except PackageNotFoundError:
+    viewer_version = "0.0.0"
 
 
 class PGSpecPlot(pg.PlotWidget):
