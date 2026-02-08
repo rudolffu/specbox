@@ -8,7 +8,7 @@ authors:
 repository-code: "https://github.com/rudolffu/specbox"
 url: "https://specbox.readthedocs.io/en/latest/index.html"
 license: "GPL-3.0-or-later"
-version: "1.0.0.dev0"
+version: "1.0.0rc1"
 abstract: "A simple tool to manipulate and visualize UV/optical/NIR spectra for astronomical research."
 keywords:
   - astronomy
