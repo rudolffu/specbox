@@ -2,15 +2,21 @@
 
 ## Installation
 
+### Install from a git clone
+
 ```bash
+git clone https://github.com/rudolffu/specbox.git
+cd specbox
 python -m pip install .
 ```
 
-For an editable install (development):
+### Editable install (development)
 
 ```bash
 python -m pip install -e .
 ```
+
+If you already have the repository cloned, run the install command from the repo root.
 
 ## Quick examples
 
@@ -38,4 +44,3 @@ viewer = PGSpecPlotThreadEnhanced(
 )
 viewer.run()
 ```
-
