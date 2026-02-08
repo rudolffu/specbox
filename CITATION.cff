@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use specbox in your research, please cite it."
+title: "specbox"
+type: software
+authors:
+  - given-names: "Yuming"
+    family-names: "Fu"
+repository-code: "https://github.com/rudolffu/specbox"
+url: "https://specbox.readthedocs.io/en/latest/index.html"
+license: "GPL-3.0-only"
+version: "1.0.0.dev0"
+abstract: "A simple tool to manipulate and visualize optical spectra for astronomical research."
+keywords:
+  - astronomy
+  - spectroscopy
+  - optical spectra
+  - quasar
+  - LAMOST
+  - SDSS
+

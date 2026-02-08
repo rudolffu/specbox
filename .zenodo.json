@@ -1,0 +1,33 @@
+{
+  "title": "specbox",
+  "description": "A simple tool to manipulate and visualize optical spectra for astronomical research.",
+  "upload_type": "software",
+  "license": "GPL-3.0-only",
+  "creators": [
+    {
+      "name": "Fu, Yuming"
+    }
+  ],
+  "access_right": "open",
+  "keywords": [
+    "astronomy",
+    "spectroscopy",
+    "optical spectra",
+    "quasar",
+    "LAMOST",
+    "SDSS"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/rudolffu/specbox",
+      "relation": "isSupplementTo",
+      "resource_type": "software"
+    },
+    {
+      "identifier": "https://specbox.readthedocs.io/en/latest/index.html",
+      "relation": "isDocumentedBy",
+      "resource_type": "publication-technicalnote"
+    }
+  ]
+}
+

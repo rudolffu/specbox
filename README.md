@@ -1,9 +1,21 @@
 # specbox
 [![Documentation Status](https://readthedocs.org/projects/specbox/badge/?version=latest)](https://specbox.readthedocs.io/en/latest/index.html)
+<!-- After the first Zenodo archive is created, replace ZENODO_DOI with the DOI string. -->
+<!-- [![DOI](https://zenodo.org/badge/DOI/ZENODO_DOI.svg)](https://doi.org/ZENODO_DOI) -->
+
 A simple tool to manipulate and visualize optical spectra for astronomical research.
 
 ## Documentation
 Online documentation is hosted on Read the Docs: https://specbox.readthedocs.io/en/latest/index.html
+
+## Citing
+Zenodo will automatically archive GitHub Releases for this repository once the GitHub↔Zenodo integration
+is enabled. After the first release is published, add the Zenodo DOI badge above and cite the DOI.
+
+GitHub can also display citation metadata from `CITATION.cff`.
+
+## License
+GPL-3.0-only. See `LICENSE`.
 
 ## Installation
 ### Dependencies
