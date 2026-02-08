@@ -53,6 +53,14 @@ html_theme = os.environ.get("SPHINX_HTML_THEME", "sphinx_rtd_theme")
 
 root_doc = "index"
 
+html_context = {
+    "display_github": True,
+    "github_user": "rudolffu",
+    "github_repo": "specbox",
+    "github_version": "main",
+    "conf_py_path": "/specbox/docs/",
+}
+
 source_suffix = {
     ".rst": "restructuredtext",
     ".md": "myst-nb",
