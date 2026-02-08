@@ -18,7 +18,7 @@ except PackageNotFoundError:
 version = release.split("+", 1)[0]
 
 extensions = [
-    "myst_parser",
+    "myst_nb",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.intersphinx",
@@ -55,7 +55,8 @@ root_doc = "index"
 
 source_suffix = {
     ".rst": "restructuredtext",
-    ".md": "markdown",
+    ".md": "myst-nb",
+    ".ipynb": "myst-nb",
 }
 
 myst_enable_extensions = [
@@ -63,6 +64,8 @@ myst_enable_extensions = [
 ]
 
 myst_heading_anchors = 3
+
+nb_execution_mode = "off"
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),

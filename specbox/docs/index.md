@@ -5,6 +5,7 @@
 :caption: User guide
 
 getting_started
+notebooks
 VITUTORIAL
 api/index
 ```
