@@ -2,7 +2,7 @@
   "title": "specbox",
   "description": "A simple tool to manipulate and visualize UV/optical/NIR spectra for astronomical research.",
   "upload_type": "software",
-  "license": "GPL-3.0-only",
+  "license": "gpl-3.0",
   "creators": [
     {
       "name": "Fu, Yuming"

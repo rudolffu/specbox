@@ -15,7 +15,7 @@ is enabled. After the first release is published, add the Zenodo DOI badge above
 GitHub can also display citation metadata from `CITATION.cff`.
 
 ## License
-GPL-3.0-only. See `LICENSE`.
+GPLv3. See `LICENSE`.
 
 ## Installation
 ### Dependencies
