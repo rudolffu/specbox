@@ -1,6 +1,9 @@
 # specbox
 A simple tool to manipulate and visualize optical spectra for astronomical research.
 
+## Documentation
+Online documentation is hosted on Read the Docs: https://specbox.readthedocs.io/en/latest/index.html
+
 ## Installation
 ### Dependencies
 - `numpy`

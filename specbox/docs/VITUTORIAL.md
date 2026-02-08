@@ -2,6 +2,8 @@
 
 This repository provides a visual inspection tool for quasar spectra. The tool enables you to load FITS spectra, interactively adjust the redshift using a non‐linear slider and spin box, and classify each spectrum using simple keyboard shortcuts. It also supports loading previous inspection results from a CSV history file so that already inspected spectra are skipped.
 
+Online documentation (Read the Docs): https://specbox.readthedocs.io/en/latest/index.html
+
 ---
 
 ## Table of Contents
