@@ -20,4 +20,3 @@ python:
     - requirements: specbox/docs/requirements.txt
     - method: pip
       path: .
-
