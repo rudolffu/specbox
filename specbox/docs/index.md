@@ -7,6 +7,7 @@
 :caption: User guide
 
 getting_started
+spectrum_classes
 notebooks
 VITUTORIAL
 api/index
