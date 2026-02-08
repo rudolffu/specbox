@@ -1,6 +1,7 @@
 # specbox documentation
 
 [![GitHub](https://img.shields.io/badge/GitHub-rudolffu%2Fspecbox-181717?logo=github)](https://github.com/rudolffu/specbox)
+[![PyPI](https://img.shields.io/pypi/v/specbox)](https://pypi.org/project/specbox/)
 
 ```{toctree}
 :maxdepth: 2

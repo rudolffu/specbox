@@ -2,6 +2,12 @@
 
 ## Installation
 
+### Install from PyPI
+
+```bash
+python -m pip install specbox
+```
+
 ### Install from a git clone
 
 ```bash

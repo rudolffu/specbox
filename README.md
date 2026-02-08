@@ -1,5 +1,6 @@
 # specbox
 [![Documentation Status](https://readthedocs.org/projects/specbox/badge/?version=latest)](https://specbox.readthedocs.io/en/latest/index.html)
+[![PyPI version](https://img.shields.io/pypi/v/specbox)](https://pypi.org/project/specbox/)
 <!-- After the first Zenodo archive is created, replace ZENODO_DOI with the DOI string. -->
 <!-- [![DOI](https://zenodo.org/badge/DOI/ZENODO_DOI.svg)](https://doi.org/ZENODO_DOI) -->
 
