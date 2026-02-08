@@ -29,6 +29,7 @@ class ConvenientSpecMixin():
         """
         Parameters
         ----------
+
         wave : array-like
             Wavelength array.   
         flux : array-like   
@@ -143,19 +144,21 @@ class ConvenientSpecMixin():
     def trim(self, wave_range, plot=True, inplace=False):
         """
         Trim the spectrum to a given wavelength range.
-        Parameters:
+
+        Parameters
         ----------
-            wave_range : tuple
-                The wavelength range to trim the spectrum.
-            plot : bool
-                Plot the trimmed spectrum.
-            inplace : bool
-                If True, the spectrum is trimmed in place.
-                If False, a new ConvenientSpecMixin object is created.
-        Returns:
+        wave_range : tuple
+            The wavelength range to trim the spectrum.
+        plot : bool
+            Plot the trimmed spectrum.
+        inplace : bool
+            If True, the spectrum is trimmed in place.
+            If False, a new ConvenientSpecMixin object is created.
+
+        Returns
         -------
-            self (if inplace=True) or a trimmed copy : ConvenientSpecMixin
-                The trimmed spectrum.
+        ConvenientSpecMixin
+            The trimmed spectrum (``self`` if ``inplace=True``, otherwise a copy).
         """
         wave = self.wave.value
         idx = (wave >= wave_range[0]) & (wave <= wave_range[1])
@@ -193,27 +196,29 @@ class ConvenientSpecMixin():
     def smooth(self, window_length, polyorder, plot=True, inplace=False, sigclip=False, **kwargs):
         """
         Smooth the spectrum with scipy.signal.savgol_filter.
-        Parameters:
+
+        Parameters
         ----------
-            window_length : int
-                The length of the filter window (i.e., the number of coefficients).
-                `window_length` must be a positive odd integer. If `mode` is 'interp',
-                `window_length` must be less than or equal to the size of `x`.
-            polyorder : int
-                The order of the polynomial used to fit the samples.
-                `polyorder` must be less than `window_length`.
-            plot : bool
-                Plot the smoothed spectrum.
-            inplace : bool
-                Replace the original spectrum with the smoothed one.
-            sigclip : bool
-                Sigma clip the smoothed spectrum.
-            **kwargs : dict
-                Keyword arguments for scipy.signal.savgol_filter.
-        Returns:
+        window_length : int
+            The length of the filter window (i.e., the number of coefficients).
+            ``window_length`` must be a positive odd integer. If ``mode`` is ``'interp'``,
+            ``window_length`` must be less than or equal to the size of ``x``.
+        polyorder : int
+            The order of the polynomial used to fit the samples.
+            ``polyorder`` must be less than ``window_length``.
+        plot : bool
+            Plot the smoothed spectrum.
+        inplace : bool
+            Replace the original spectrum with the smoothed one.
+        sigclip : bool
+            Sigma clip the smoothed spectrum.
+        kwargs : dict
+            Keyword arguments forwarded to scipy.signal.savgol_filter.
+
+        Returns
         -------
-            self : ConvenientSpecMixin
-                The smoothed spectrum.
+        ConvenientSpecMixin
+            The smoothed spectrum.
         """
         if hasattr(self, 'flux_ori'):
             warnings.warn('The original spectrum is already replaced by the smoothed one. \
@@ -244,14 +249,16 @@ class ConvenientSpecMixin():
     def plot(self, ax=None, **kwargs):
         """
         Plot the spectrum.
-        Parameters:
+
+        Parameters
         ----------
-            ax : matplotlib.axes.Axes
-                The axes to plot on. If None, a new set of axes is created.
-        Returns:
+        ax : matplotlib.axes.Axes
+            The axes to plot on. If None, a new set of axes is created.
+
+        Returns
         -------
-            ax : matplotlib.axes.Axes
-                The axes that were plotted on.
+        matplotlib.axes.Axes
+            The axes that were plotted on.
         """
         if ax is None:
             fig, ax = plt.subplots()
@@ -266,13 +273,14 @@ class ConvenientSpecMixin():
     def to_restframe(self, z=None, inplace=False):
         """
         Convert the spectrum to the rest-frame.
-        Parameters:
+
+        Parameters
         ----------
-            z : float
-                Redshift of the spectrum.
-            inplace : bool  
-                If True, the spectrum is converted to the rest-frame in place.
-                If False, only a new Spectrum object is created.
+        z : float
+            Redshift of the spectrum.
+        inplace : bool
+            If True, the spectrum is converted to the rest-frame in place.
+            If False, only a new Spectrum object is created.
         """
         if z is None:
             z = self.redshift
@@ -586,16 +594,18 @@ class SpecSparcl(SpecPandasRow):
 class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
     """
     Class for SDSS spectra.
-    Parameters:
+    Parameters
     ----------
+
         filename : str
             Name of the SDSS spectrum file.
     """
     def __init__(self, filename=None, redshift=None, *args, **kwargs):
         """
         Initialize the SpecSDSS class.
-        Parameters:
+        Parameters
         ----------
+
             filename : str
                 Name of the SDSS spectrum file.
             redshift : float
@@ -613,8 +623,9 @@ class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
     def read(self, filename, redshift=None, **kwargs):
         """
         Read the SDSS spectrum file.
-        Parameters:
+        Parameters
         ----------
+
             filename : str
                 Name of the SDSS spectrum file.
         """
@@ -680,8 +691,9 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
     """
     def __init__(self, filename=None, *args, **kwargs):
         """
-        Parameters:
+        Parameters
         ----------
+
             filename : str
                 Name of the file to read.    
         """
@@ -699,8 +711,9 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
     def read(self, filename, **kwargs):
         """
         Read the spectrum.
-        Parameters:
+        Parameters
         ----------
+
             filename : str
                 Name of the file to read.
             ra : float
@@ -779,19 +792,21 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
     def trim(self, wave_range, plot=True, inplace=False):
         """
         Trim the spectrum to a given wavelength range.
-        Parameters:
+
+        Parameters
         ----------
-            wave_range : tuple
-                The wavelength range to trim the spectrum.
-            plot : bool
-                Plot the trimmed spectrum.
-            inplace : bool
-                If True, the spectrum is trimmed in place.
-                If False, a new SpecIRAF object is created.
-        Returns:
+        wave_range : tuple
+            The wavelength range to trim the spectrum.
+        plot : bool
+            Plot the trimmed spectrum.
+        inplace : bool
+            If True, the spectrum is trimmed in place.
+            If False, a new SpecIRAF object is created.
+
+        Returns
         -------
-            self (if inplace=True) or a trimmed copy : SpecIRAF
-                The trimmed spectrum.
+        SpecIRAF
+            The trimmed spectrum (``self`` if ``inplace=True``, otherwise a copy).
         """
         trimmed_copy = super().trim(wave_range, plot=plot, inplace=inplace)
         if inplace == True:
@@ -809,8 +824,9 @@ class SpecLAMOST(ConvenientSpecMixin, SpecIOMixin):
     """
     def __init__(self, filename=None, flux_calibrated=False, *args, **kwargs):
         """
-        Parameters:
+        Parameters
         ----------
+
         filename : str
             Name of the file to read.
         flux_calibrated : bool
@@ -834,8 +850,9 @@ class SpecLAMOST(ConvenientSpecMixin, SpecIOMixin):
     def read(self, filename, **kwargs):
         """
         Read the data from a LAMOST LRS file.
-        Parameters:
+        Parameters
         ----------
+
         filename : str
             Name of the file to read.
         """
@@ -1136,8 +1153,9 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
     """
     def __init__(self, filename=None, ext=None, extname=None, clip=True, *args, **kwargs):
         """
-        Parameters:
+        Parameters
         ----------
+
             filename : str
                 Name of the Euclid spectrum file.
             ext : int
@@ -1160,8 +1178,9 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
     def read(self, filename, ext=None, extname=None, clip=True, **kwargs):
         """
         Read the Euclid 1D spectrum.
-        Parameters:
+        Parameters
         ----------
+
             filename : str
                 Name of the Euclid spectrum file.
             ext : int
