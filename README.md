@@ -1,4 +1,5 @@
 # specbox
+[![Documentation Status](https://readthedocs.org/projects/specbox/badge/?version=latest)](https://specbox.readthedocs.io/en/latest/index.html)
 A simple tool to manipulate and visualize optical spectra for astronomical research.
 
 ## Documentation
