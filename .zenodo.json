@@ -27,6 +27,11 @@
       "identifier": "https://specbox.readthedocs.io/en/latest/index.html",
       "relation": "isDocumentedBy",
       "resource_type": "publication-technicalnote"
+    },
+    {
+      "identifier": "https://pypi.org/project/specbox/",
+      "relation": "isSupplementTo",
+      "resource_type": "software"
     }
   ]
 }
