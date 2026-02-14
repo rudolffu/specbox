@@ -1,0 +1,2 @@
+recursive-include specbox/data *
+global-exclude *.DS_Store

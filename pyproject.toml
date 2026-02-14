@@ -42,4 +42,4 @@ include-package-data = true
 include = ["specbox*"]
 
 [tool.setuptools.package-data]
-specbox = ["data/*"]
+specbox = ["data/**/*"]
