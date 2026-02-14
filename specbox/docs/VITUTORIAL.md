@@ -82,13 +82,21 @@ To test the installation, you can run the following code snippet in a Python she
 import matplotlib.pyplot as plt
 from specbox.basemodule import SpecEuclid1d
 
-sp1 = SpecEuclid1d('COMBINED_SPECS.fits', ext=1) # example path to the FITS file containing the spectra, and the extension number
+sp1 = SpecEuclid1d(
+    'COMBINED_SPECS.fits',
+    ext=1,
+    good_pixels_only=True,  # Keep only recommended bins from Euclid MASK flags
+)  # example path to the FITS file containing spectra
 
 sp1.plot()
 plt.show()
 ```
 
 If the installation is successful, you should see a plot of the spectrum.
+
+Notes:
+- `SpecEuclid1d` exposes `mask`, `good_mask`, and `bad_mask` (when the `MASK` column is present).
+- `good_pixels_only=True` applies the Euclid recommendation to discard bins with odd `MASK` or `MASK >= 64`.
 
 ### Reading SPARCL parquet spectra (dataframe-backed)
 

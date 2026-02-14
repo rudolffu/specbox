@@ -62,6 +62,26 @@ Notes:
 - `trim(inplace=True)` updates wavelength calibration keywords (`CRVAL1`, `CRPIX1`, `CDELT1`) and
   also trims the underlying data array accordingly.
 
+## `SpecEuclid1d`
+
+Reader for Euclid combined 1D spectra (SIR combined spectra FITS).
+
+```python
+from specbox.basemodule import SpecEuclid1d
+
+# Load one extension by EXTNAME and keep only recommended pixels.
+spec = SpecEuclid1d("COMBINED_EUCLID_SPECS.fits", extname="1234567890", good_pixels_only=True)
+spec.plot()
+```
+
+Notes:
+- The reader exposes `mask` when the `MASK` column exists.
+- It computes:
+  - `bad_mask = (mask % 2 == 1) | (mask >= 64)`
+  - `good_mask = ~bad_mask`
+- If `good_pixels_only=True`, only `good_mask` pixels are used to initialize `wave/flux/err/spec`.
+- If `z_vi` is available in the header, `redshift` is set from `z_vi`.
+
 ## `SpecPandasRow`
 
 Generic reader for “table-of-spectra” datasets readable by pandas where each row contains
@@ -121,4 +141,3 @@ trimmed = spec.trim((5000, 8000), plot=True, inplace=False)
 ```python
 spec.to_restframe(z=2.0, inplace=True)
 ```
-

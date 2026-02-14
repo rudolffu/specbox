@@ -15,8 +15,8 @@ from pathlib import Path
 import os
 
 # locate the data file in the package
-data_path = Path(files("specbox").joinpath("data"))
-fits_file = data_path / "optical_nir_qso_template_v1.fits"
+data_path = Path(files("specbox").joinpath("data/templates"))
+fits_file = data_path / "qso1" / "optical_nir_qso_template_v1.fits"
 tb_temp = Table.read(str(fits_file))
 tb_temp.rename_columns(['wavelength', 'flux'], ['Wave', 'Flux'])
 try:

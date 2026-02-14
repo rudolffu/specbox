@@ -42,6 +42,7 @@ The main classes and functions of specbox are:
 #### `basemodule.py`:
 - `SpecLAMOST` and `SpecSDSS`: classes to read and manipulate spectra from the LAMOST and SDSS surveys, respectively.
 - `SpecIRAF`: class to read and manipulate spectra from the IRAF format.
+- `SpecEuclid1d`: reader for Euclid combined 1D spectra, with `MASK`/`good_mask` support and optional `good_pixels_only=True`.
 - `SpecPandasRow`: generic reader for "table-of-spectra" files readable by pandas (parquet/csv/feather/...), where each row stores arrays (e.g. wavelength/flux/ivar).
 - `SpecSparcl`: SPARCL parquet/table reader (e.g., for file `sparcl_spectra.parquet`). Common metadata columns include `data_release`, `targetid`, and (optional) `euclid_object_id` for Euclid overlay.
 #### `qtmodule.py`:

@@ -19,10 +19,10 @@ import pandas as pd
 from importlib.resources import files
 from pathlib import Path
 
-data_path = Path(files("specbox").joinpath("data"))
+data_path = Path(files("specbox").joinpath("data/templates"))
 
 my_dict = {}
-tb_temp = Table.read(str(data_path / "qso_temp_vandenberk2001.mrt.txt"), format="ascii")
+tb_temp = Table.read(str(data_path / "qso1" / "qso_temp_vandenberk2001.mrt.txt"), format="ascii")
 
 class PGSpecPlotFeLo(pg.PlotWidget):
     """
