@@ -528,6 +528,8 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self._euclid_overlay_cache = {}
         self._observed_wmin = None
         self._observed_wmax = None
+        self._annotation_wave = None
+        self._annotation_flux = None
 
         # ``spectra`` can either be a FITS file containing multiple extensions
         # or a list of individual spectrum files.
@@ -684,8 +686,11 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         """Plot the spectrum without template."""
         spec = self.spec
         is_sparcl = 'SpecSparcl' in globals() and isinstance(spec, SpecSparcl)
+        is_euclid = getattr(spec, 'telescope', '').lower() == 'euclid'
         self._observed_wmin = None
         self._observed_wmax = None
+        self._annotation_wave = None
+        self._annotation_flux = None
         
         # Follow original code pattern with sigma clipping
         wave_full = spec.wave.value if hasattr(spec.wave, 'value') else spec.wave
@@ -696,15 +701,22 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             wave_full = wave_full[idx]
             flux_full = flux_full[idx]
         
-        # Apply sigma clipping like original code
-        flux_masked = np.ma.masked_invalid(flux_full)
-        flux_sigclip = sigma_clip(flux_masked, sigma=10, maxiters=3)
-        wave = wave_full[~flux_sigclip.mask]
-        flux = flux_sigclip.data[~flux_sigclip.mask]
+        if is_euclid:
+            finite = np.isfinite(wave_full) & np.isfinite(flux_full)
+            wave = wave_full[finite]
+            flux = flux_full[finite]
+        else:
+            # Apply sigma clipping like original code
+            flux_masked = np.ma.masked_invalid(flux_full)
+            flux_sigclip = sigma_clip(flux_masked, sigma=10, maxiters=3)
+            wave = wave_full[~flux_sigclip.mask]
+            flux = flux_sigclip.data[~flux_sigclip.mask]
         
         # Store cleaned data for template scaling
         self.wave = wave
         self.flux = flux
+        annotation_wave_parts = [np.asarray(wave)]
+        annotation_flux_parts = [np.asarray(flux)]
         
         if is_sparcl:
             # Make the raw SPARCL spectrum semi-transparent to emphasize smoothing.
@@ -724,17 +736,39 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                 if euclid_spec is not None:
                     euclid_wave = euclid_spec.wave.value
                     euclid_flux = euclid_spec.flux.value
+                    euclid_good_mask = getattr(euclid_spec, 'good_mask', None)
                     scale = 1.0
-                    denom = np.nanmedian(np.abs(euclid_flux))
+                    denom_flux = euclid_flux
+                    if euclid_good_mask is not None and len(euclid_good_mask) == len(euclid_flux):
+                        good = np.asarray(euclid_good_mask, dtype=bool)
+                        good = good & np.isfinite(euclid_wave) & np.isfinite(euclid_flux)
+                        if np.any(good):
+                            denom_flux = euclid_flux[good]
+                    denom = np.nanmedian(np.abs(denom_flux))
                     numer = np.nanmedian(np.abs(flux))
                     if np.isfinite(denom) and denom > 0 and np.isfinite(numer) and numer > 0:
                         scale = numer / denom
+                    euclid_flux_scaled = euclid_flux * scale
+                    # Plot unmasked Euclid overlay in grey with alpha.
                     self.plot(
                         euclid_wave,
-                        euclid_flux * scale,
-                        pen=pg.mkPen((0, 150, 0, 180), width=2),
+                        euclid_flux_scaled,
+                        pen=pg.mkPen((95, 95, 95, 150), width=2),
                         antialias=True,
                     )
+                    # Overlay good Euclid pixels.
+                    if euclid_good_mask is not None and len(euclid_good_mask) == len(euclid_flux):
+                        good = np.asarray(euclid_good_mask, dtype=bool)
+                        good = good & np.isfinite(euclid_wave) & np.isfinite(euclid_flux_scaled)
+                        if np.any(good):
+                            self.plot(
+                                euclid_wave[good],
+                                euclid_flux_scaled[good],
+                                pen=pg.mkPen((0, 150, 0, 220), width=2),
+                                antialias=True,
+                            )
+                    annotation_wave_parts.append(np.asarray(euclid_wave))
+                    annotation_flux_parts.append(np.asarray(euclid_flux_scaled))
 
                     try:
                         self._observed_wmin = float(min(np.nanmin(wave), np.nanmin(euclid_wave)))
@@ -746,11 +780,34 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                 self._observed_wmin = float(np.nanmin(wave))
                 self._observed_wmax = float(np.nanmax(wave))
         else:
-            # Plot as dots connected by lines like original
-            self.plot(wave, flux, pen='b', symbol='o', symbolSize=4, 
-                     symbolPen=None, connect='finite', symbolBrush='k', antialias=True)
-            self._observed_wmin = float(np.nanmin(wave))
-            self._observed_wmax = float(np.nanmax(wave))
+            if is_euclid:
+                # Plot unmasked Euclid spectrum in grey with alpha.
+                self.plot(wave, flux, pen=pg.mkPen((95, 95, 95, 150), width=2), antialias=True)
+                # Overlay good pixels when mask info is available.
+                good_mask = getattr(spec, 'good_mask', None)
+                if good_mask is not None and len(good_mask) == len(wave_full):
+                    good_mask = np.asarray(good_mask, dtype=bool)
+                    good_mask = good_mask & np.isfinite(wave_full) & np.isfinite(flux_full)
+                    if np.any(good_mask):
+                        wave_good = wave_full[good_mask]
+                        flux_good = flux_full[good_mask]
+                        self.plot(wave_good, flux_good, pen=pg.mkPen((0, 0, 180, 220), width=2), antialias=True)
+                        self.wave = wave_good
+                        self.flux = flux_good
+                        annotation_wave_parts.append(np.asarray(wave))
+                        annotation_flux_parts.append(np.asarray(flux))
+                self._observed_wmin = float(np.nanmin(wave))
+                self._observed_wmax = float(np.nanmax(wave))
+            else:
+                # Plot as dots connected by lines like original
+                self.plot(wave, flux, pen='b', symbol='o', symbolSize=4, 
+                         symbolPen=None, connect='finite', symbolBrush='k', antialias=True)
+                self._observed_wmin = float(np.nanmin(wave))
+                self._observed_wmax = float(np.nanmax(wave))
+
+        if annotation_wave_parts and annotation_flux_parts:
+            self._annotation_wave = np.concatenate(annotation_wave_parts)
+            self._annotation_flux = np.concatenate(annotation_flux_parts)
 
         # Update labels with proper units
         if hasattr(spec, 'flux_unit') and spec.flux_unit is not None:
@@ -761,60 +818,36 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             wave_unit_str = f'Wavelength ({spec.wave_unit})'
 
         
-        # Plot template integrated like original code
-        if getattr(spec, 'telescope', '').lower() == 'euclid':
-            template = self.template_manager.get_template(self.template_manager.current_template)
-            if template is not None:
-                z_vi = spec.z_vi
-                wave_temp = template['wave'] * (1 + z_vi)
-                # Use original wavelength clipping for Euclid
-                idx = np.where((wave_temp >= 12047.4) & (wave_temp <= 18734))
-                flux_temp = template['flux']
-                wave_temp = wave_temp[idx]
-                flux_temp = flux_temp[idx]
-                
-                # Use your original scaling with the sigma-clipped flux
-                flux_temp_scaled = flux_temp / np.mean(flux_temp) * np.abs(flux.mean()) * 1.5
-                
-                self.plot(wave_temp, flux_temp_scaled, pen=pg.mkPen('r', width=2), antialias=True)
-                self._label_template_emission_lines(
-                    wmin=self._observed_wmin if self._observed_wmin is not None else float(np.nanmin(wave)),
-                    wmax=self._observed_wmax if self._observed_wmax is not None else float(np.nanmax(wave)),
-                    z=z_vi,
-                )
-        else:
-            # For non-Euclid data, plot template unclipped
-            template = self.template_manager.get_template(self.template_manager.current_template)
-            if template is not None:
-                z_vi = spec.z_vi
-                wave_temp = template['wave'] * (1 + z_vi)
-                flux_temp = template['flux']
-                
-                # For dataframe-backed SPARCL spectra (and similar), only plot the
-                # template over the observed wavelength range.
-                if is_sparcl:
-                    if self._observed_wmin is not None and self._observed_wmax is not None:
-                        wmin = float(self._observed_wmin)
-                        wmax = float(self._observed_wmax)
-                    else:
-                        finite = np.isfinite(wave) & np.isfinite(flux)
-                        if np.any(finite):
-                            wmin = float(np.nanmin(wave[finite]))
-                            wmax = float(np.nanmax(wave[finite]))
-                        else:
-                            wmin = float(np.nanmin(wave))
-                            wmax = float(np.nanmax(wave))
-                    idx = (wave_temp >= wmin) & (wave_temp <= wmax)
-                    wave_temp = wave_temp[idx]
-                    flux_temp = flux_temp[idx]
+        # Plot template and always clip it to the observed wavelength span.
+        template = self.template_manager.get_template(self.template_manager.current_template)
+        if template is not None:
+            z_vi = getattr(spec, 'z_vi', getattr(spec, 'redshift', 0.0))
+            if z_vi is None:
+                z_vi = 0.0
+            wave_temp = template['wave'] * (1 + z_vi)
+            flux_temp = template['flux']
 
-                # Use original scaling with the sigma-clipped flux
+            if self._observed_wmin is not None and self._observed_wmax is not None:
+                wmin = float(self._observed_wmin)
+                wmax = float(self._observed_wmax)
+            else:
+                finite = np.isfinite(wave) & np.isfinite(flux)
+                if np.any(finite):
+                    wmin = float(np.nanmin(wave[finite]))
+                    wmax = float(np.nanmax(wave[finite]))
+                else:
+                    wmin = float(np.nanmin(wave))
+                    wmax = float(np.nanmax(wave))
+            idx = (wave_temp >= wmin) & (wave_temp <= wmax)
+            wave_temp = wave_temp[idx]
+            flux_temp = flux_temp[idx]
+
+            if wave_temp.size > 0 and np.isfinite(np.mean(flux_temp)) and np.mean(flux_temp) != 0:
                 flux_temp_scaled = flux_temp / np.mean(flux_temp) * np.abs(flux.mean()) * 1.5
-                
                 self.plot(wave_temp, flux_temp_scaled, pen=pg.mkPen('r', width=2), antialias=True)
                 self._label_template_emission_lines(
-                    wmin=self._observed_wmin if self._observed_wmin is not None else float(np.nanmin(wave)),
-                    wmax=self._observed_wmax if self._observed_wmax is not None else float(np.nanmax(wave)),
+                    wmin=wmin,
+                    wmax=wmax,
                     z=z_vi,
                 )
 
@@ -824,8 +857,11 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         # Update info label above plot
         self.update_spectrum_info_label()
         
-        # Auto-range like original code - ONLY after initial plotting
-        self.autoRange()
+        # Keep x-limits fixed to the clipped observed wavelength span.
+        if self._observed_wmin is not None and self._observed_wmax is not None:
+            self.setXRange(float(self._observed_wmin), float(self._observed_wmax), padding=0.0)
+        # Keep y dynamic.
+        self.enableAutoRange(axis='y', enable=True)
         
         # Coordinate signal emission is now handled in navigation methods
 
@@ -894,33 +930,31 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         if template is None:
             return
             
-        is_sparcl = 'SpecSparcl' in globals() and isinstance(self.spec, SpecSparcl)
-        z = self.spec.z_vi
+        z = getattr(self.spec, 'z_vi', getattr(self.spec, 'redshift', 0.0))
+        if z is None:
+            z = 0.0
         wave_shifted = template['wave'] * (1 + z)
         flux_template = template['flux']
 
-        if is_sparcl:
-            if self._observed_wmin is not None and self._observed_wmax is not None:
-                wmin = float(self._observed_wmin)
-                wmax = float(self._observed_wmax)
+        if self._observed_wmin is not None and self._observed_wmax is not None:
+            wmin = float(self._observed_wmin)
+            wmax = float(self._observed_wmax)
+        else:
+            wave_full = self.spec.wave.value if hasattr(self.spec.wave, 'value') else self.spec.wave
+            flux_full = self.spec.flux.value if hasattr(self.spec.flux, 'value') else self.spec.flux
+            finite = np.isfinite(wave_full) & np.isfinite(flux_full)
+            if np.any(finite):
+                wmin = float(np.nanmin(wave_full[finite]))
+                wmax = float(np.nanmax(wave_full[finite]))
             else:
-                wave_full = self.spec.wave.value if hasattr(self.spec.wave, 'value') else self.spec.wave
-                flux_full = self.spec.flux.value if hasattr(self.spec.flux, 'value') else self.spec.flux
-                finite = np.isfinite(wave_full) & np.isfinite(flux_full)
-                in_range = (wave_full >= 3800) & (wave_full <= 9300)
-                finite_in_range = finite & in_range
-                if np.any(finite_in_range):
-                    wmin = float(np.nanmin(wave_full[finite_in_range]))
-                    wmax = float(np.nanmax(wave_full[finite_in_range]))
-                elif np.any(finite):
-                    wmin = float(np.nanmin(wave_full[finite]))
-                    wmax = float(np.nanmax(wave_full[finite]))
-                else:
-                    wmin = float(np.nanmin(wave_full))
-                    wmax = float(np.nanmax(wave_full))
-            idx = (wave_shifted >= wmin) & (wave_shifted <= wmax)
-            wave_shifted = wave_shifted[idx]
-            flux_template = flux_template[idx]
+                wmin = float(np.nanmin(wave_full))
+                wmax = float(np.nanmax(wave_full))
+        idx = (wave_shifted >= wmin) & (wave_shifted <= wmax)
+        wave_shifted = wave_shifted[idx]
+        flux_template = flux_template[idx]
+
+        if wave_shifted.size == 0 or not np.isfinite(np.mean(flux_template)) or np.mean(flux_template) == 0:
+            return
         
         # Scale template like in original code (unclipped on both sides as requested)
         if hasattr(self, 'flux') and len(self.flux) > 0:
@@ -931,7 +965,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             spec_flux = self.spec.flux.value if hasattr(self.spec.flux, 'value') else self.spec.flux
             flux_scaled = flux_template / np.mean(flux_template) * np.abs(np.nanmean(spec_flux)) * 1.5
         
-        # Plot template unclipped (full wavelength range)
+        # Plot template clipped to the observed wavelength range.
         self.plot(wave_shifted, flux_scaled, pen=pg.mkPen('r', width=2), antialias=True)
         if self._observed_wmin is not None and self._observed_wmax is not None:
             self._label_template_emission_lines(wmin=self._observed_wmin, wmax=self._observed_wmax, z=z)
@@ -1089,6 +1123,29 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             self.clear()
             self.plot_single()
 
+    def _annotate_at_wave(self, wave_pos):
+        """Annotate the nearest plotted point to ``wave_pos``."""
+        wave_arr = self._annotation_wave if self._annotation_wave is not None else getattr(self, 'wave', None)
+        flux_arr = self._annotation_flux if self._annotation_flux is not None else getattr(self, 'flux', None)
+        if wave_arr is None or flux_arr is None:
+            return
+        finite = np.isfinite(wave_arr) & np.isfinite(flux_arr)
+        if not np.any(finite):
+            return
+        wave_fin = wave_arr[finite]
+        flux_fin = flux_arr[finite]
+        idx = np.abs(wave_fin - wave_pos).argmin()
+        wave_val = wave_fin[idx]
+        flux_val = flux_fin[idx]
+        annotation_text = pg.TextItem(
+            text="Wavelength: {0:.2f} Flux: {1:.2e}".format(wave_val, flux_val),
+            anchor=(0, 0), color='r', border='w',
+            fill=(255, 255, 255, 200))
+        annotation_text.setFont(QFont("Arial", 18, QFont.Bold))
+        annotation_text.setPos(wave_val, flux_val)
+        self.addItem(annotation_text)
+        print("Wavelength: {0:.2f} Flux: {1:.2e}".format(wave_val, flux_val))
+
     def keyPressEvent(self, event):
         """Handle keyboard events."""
         spec = self.spec
@@ -1167,18 +1224,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             mouse_pos = self.mapFromGlobal(QCursor.pos())
             vb = self.getViewBox()
             wave_pos = vb.mapSceneToView(mouse_pos).x()
-            if hasattr(self, 'wave') and hasattr(self, 'flux'):
-                idx = np.abs(self.wave - wave_pos).argmin()
-                wave = self.wave[idx]
-                flux = self.flux[idx]
-                annotation_text = pg.TextItem(
-                    text="Wavelength: {0:.2f} Flux: {1:.2e}".format(wave, flux), 
-                    anchor=(0, 0), color='r', border='w',
-                    fill=(255, 255, 255, 200))
-                annotation_text.setFont(QFont("Arial", 18, QFont.Bold))
-                annotation_text.setPos(wave, flux)
-                self.addItem(annotation_text)
-                print("Wavelength: {0:.2f} Flux: {1:.2e}".format(wave, flux))
+            self._annotate_at_wave(wave_pos)
         if event.modifiers() & Qt.ControlModifier:
             if event.key() == Qt.Key_R:
                 self.clear()
@@ -1219,18 +1265,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             mouse_pos = self.mapFromGlobal(QCursor.pos())
             self.vb = self.getViewBox()
             wave = self.vb.mapSceneToView(mouse_pos).x()
-            if hasattr(self, 'wave') and hasattr(self, 'flux'):
-                idx = np.abs(self.wave - wave).argmin()
-                wave = self.wave[idx]
-                flux = self.flux[idx]
-                annotation_text = pg.TextItem(
-                    text="Wavelength: {0:.2f} Flux: {1:.2e}".format(wave, flux), 
-                    anchor=(0, 0), color='r', border='w',
-                    fill=(255, 255, 255, 200))
-                annotation_text.setFont(QFont("Arial", 18, QFont.Bold))
-                annotation_text.setPos(wave, flux)
-                self.addItem(annotation_text)
-                print("Wavelength: {0:.2f} Flux: {1:.2e}".format(wave, flux))
+            self._annotate_at_wave(wave)
 
 
 class PGSpecPlotAppEnhanced(QApplication):
