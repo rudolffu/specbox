@@ -1,5 +1,5 @@
 {
-  "title": "specbox",
+  "title": "specbox: a simple tool to manipulate and visualize UV/optical/NIR spectra for astronomical research",
   "description": "A simple tool to manipulate and visualize UV/optical/NIR spectra for astronomical research.",
   "upload_type": "software",
   "license": "gpl-3.0",

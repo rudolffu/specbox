@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use specbox in your research, please cite it."
-title: "specbox"
+title: "specbox: a simple tool to manipulate and visualize UV/optical/NIR spectra for astronomical research"
 type: software
 authors:
   - given-names: "Yuming"
