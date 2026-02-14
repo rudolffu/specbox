@@ -750,12 +750,6 @@ class SpecIRAF(ConvenientSpecMixin, SpecIOMixin):
                 dec = coord.dec.value
         self.ra = ra
         self.dec = dec
-        # if 'J' in objname:
-        #     try:
-        #         name = designation(ra, dec, telescope)
-        #     except:
-        #         name = objname
-        # else:
         name = objname
         if side is not None:
             name = name + side
@@ -989,10 +983,7 @@ class NIRSpecS3d():
         sci = savgol_filter(sci,
                             window_length=25,
                             polyorder=3,
-                            axis=0)
-            #     for i in range(sci.shape[1]):
-            # for j in range(sci.shape[2]):
-            #     sci[:,i,j] = sigmaclip(sci[:,i,j])    
+                            axis=0) 
         sci_unit = u.Unit(sci_hdr['BUNIT'])
         wave_unit = u.Unit(sci_hdr['CUNIT3'])
         self.sci_unit = sci_unit
@@ -1016,18 +1007,10 @@ class NIRSpecS3d():
             self.wave = wave
         else:
             print('Not implemented.')
-        # with asdf.open(fname) as af:
-        #     wcslist = [af.tree["meta"]["wcs"]]
-        # spectra = []
-        # for hdu, wcs in zip(hdu, wcslist):
         sci[sci<=0]==np.nan
         flux_array = sci.T
         flux = Quantity(flux_array, unit=sci_unit)
         wavelength = Quantity(wave, unit=wave_unit)
-        # grid = grid_from_bounding_box(wcs.bounding_box)[:, :, 0, 0]
-        # _, _, wavelength_array = wcs(*grid)
-        # _, _, wavelength_unit = wcs.output_frame.unit
-        # Merge primary and slit headers and dump into meta
         slit_header = sci_hdr
         header = hdr.copy()
         header.extend(slit_header, strip=True, update=True)
