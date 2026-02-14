@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "specbox"
-version = "1.0.0rc1"
+version = "1.0.0"
 description = "A simple tool to manipulate and visualize UV/optical/NIR spectra for astronomical research."
 readme = "README.md"
 requires-python = ">=3.9"
