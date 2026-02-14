@@ -1,13 +1,30 @@
 # specbox
 [![Documentation Status](https://readthedocs.org/projects/specbox/badge/?version=latest)](https://specbox.readthedocs.io/en/latest/index.html)
 [![PyPI version](https://img.shields.io/pypi/v/specbox)](https://pypi.org/project/specbox/)
-<!-- After the first Zenodo archive is created, replace ZENODO_DOI with the DOI string. -->
-<!-- [![DOI](https://zenodo.org/badge/DOI/ZENODO_DOI.svg)](https://doi.org/ZENODO_DOI) -->
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18642758.svg)](https://doi.org/10.5281/zenodo.18642758)
+
 
 A simple tool to manipulate and visualize UV/optical/NIR spectra for astronomical research.
 
 ## Documentation
 Online documentation is hosted on Read the Docs: https://specbox.readthedocs.io/en/latest/index.html
+
+## Citation
+```bibtex
+@software{fu_2026_18642758,
+  author       = {Fu, Yuming},
+  title        = {specbox: A simple tool to manipulate and visualize
+                   UV/optical/NIR spectra for astronomical research.
+                  },
+  month        = feb,
+  year         = 2026,
+  publisher    = {Zenodo},
+  version      = {v1.0.0},
+  doi          = {10.5281/zenodo.18642758},
+  url          = {https://doi.org/10.5281/zenodo.18642758},
+}
+```
+
 
 ## License
 GPLv3. See `LICENSE`.

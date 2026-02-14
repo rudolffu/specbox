@@ -7,6 +7,14 @@ authors:
     family-names: "Fu"
 repository-code: "https://github.com/rudolffu/specbox"
 url: "https://specbox.readthedocs.io/en/latest/index.html"
+doi: "10.5281/zenodo.18642758"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.18642758"
+    description: "Zenodo archive"
+  - type: url
+    value: "https://doi.org/10.5281/zenodo.18642758"
+    description: "DOI landing page"
 license: "GPL-3.0-or-later"
 version: "1.0.0"
 abstract: "A simple tool to manipulate and visualize UV/optical/NIR spectra for astronomical research."

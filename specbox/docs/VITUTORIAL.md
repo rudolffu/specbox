@@ -4,6 +4,22 @@ This repository provides a visual inspection tool for quasar spectra. The tool e
 
 Online documentation (Read the Docs): https://specbox.readthedocs.io/en/latest/index.html
 
+Citation:
+```bibtex
+@software{fu_2026_18642758,
+  author       = {Fu, Yuming},
+  title        = {specbox: A simple tool to manipulate and visualize
+                   UV/optical/NIR spectra for astronomical research.
+                  },
+  month        = feb,
+  year         = 2026,
+  publisher    = {Zenodo},
+  version      = {v1.0.0},
+  doi          = {10.5281/zenodo.18642758},
+  url          = {https://doi.org/10.5281/zenodo.18642758},
+}
+```
+
 ---
 
 ## Table of Contents
