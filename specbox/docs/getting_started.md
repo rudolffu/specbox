@@ -2,13 +2,29 @@
 
 ## Installation
 
-### Install from PyPI
+It is recommended to set up an isolated environment before installing (choose either option A or B):
+
+```bash
+# Option A: Python venv
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+```
+
+```bash
+# Option B: conda
+conda create -n specbox python=3.13 -y
+conda activate specbox
+python -m pip install --upgrade pip
+```
+
+### Install the stable release from PyPI (recommended)
 
 ```bash
 python -m pip install specbox
 ```
 
-### Install from a git clone
+### Install a pre-release/development version from source
 
 ```bash
 git clone https://github.com/rudolffu/specbox.git
