@@ -25,14 +25,24 @@ from PIL import Image
 import io
 import json
 import hashlib
+import time
 from scipy.signal import savgol_filter
 import re
-from astroquery.hips2fits import hips2fits
-from astropy.coordinates import Longitude, Latitude, Angle
 import concurrent.futures
 import threading
 from specutils import Spectrum
 from importlib.metadata import PackageNotFoundError, version as dist_version
+from ..auxmodule.cutout_download import (
+    EUCLID_CUTOUT_SURVEYS,
+    fetch_cutout,
+    get_cache_filename,
+    is_no_data_error,
+    is_valid_cutout_target,
+    load_cutout_from_cache,
+    predownload_cutouts,
+    print_cli_progress,
+    save_cutout_to_cache,
+)
 
 # locate the data files in the package
 data_path = Path(files("specbox").joinpath("data/templates"))
@@ -167,9 +177,7 @@ class ImageCutoutWidget(QWidget):
         self.progress.setRange(0, 0)  # Indeterminate progress
 
         # Only fetch color for now to avoid loading issues
-        euclid_surveys = [
-            ("CDS/P/Euclid/Q1/color", "Euclid composite")
-        ]
+        euclid_surveys = list(EUCLID_CUTOUT_SURVEYS)
         
         size_arcsec = float(self.size_combo.currentText())
         
@@ -188,14 +196,13 @@ class ImageCutoutWidget(QWidget):
                     else:
                         self.add_status_message(f"Fetching {band_name}...")
                         # Use JPEG format for faster loading
-                        result = hips2fits.query(
-                            hips=survey,
-                            width=150, height=150,
-                            ra=Longitude(ra * u.deg),
-                            dec=Latitude(dec * u.deg), 
-                            fov=Angle(size_arcsec * u.arcsec),
-                            projection="CAR",
-                            format='jpg'
+                        result = fetch_cutout(
+                            ra=ra,
+                            dec=dec,
+                            survey_name=survey,
+                            size_arcsec=size_arcsec,
+                            width=150,
+                            height=150,
                         )
                         if result is not None:
                             # Save to cache
@@ -391,39 +398,27 @@ class ImageCutoutWidget(QWidget):
     
     def get_cache_filename(self, objid, survey_name):
         """Get cache filename for an object and survey."""
-        if not self.buffer_dir:
-            return None
-        # Create a safe filename from survey name
-        safe_survey = survey_name.replace('/', '_').replace(' ', '_')
-        return self.buffer_dir / f"{objid}_{safe_survey}.jpg"
+        return get_cache_filename(self.buffer_dir, objid, survey_name)
     
     def save_cutout_to_cache(self, objid, survey_name, image_data):
         """Save cutout image to cache."""
         if not self.buffer_dir:
             return
-        cache_file = self.get_cache_filename(objid, survey_name)
-        if cache_file:
-            try:
-                # Convert numpy array to PIL and save
-                if len(image_data.shape) == 3:  # RGB
-                    image = Image.fromarray(image_data, mode='RGB')
-                else:  # Grayscale
-                    image = Image.fromarray(image_data, mode='L')
-                image.save(cache_file, 'JPEG')
-            except Exception as e:
-                print(f"Error saving cache file {cache_file}: {e}")
+        try:
+            save_cutout_to_cache(self.buffer_dir, objid, survey_name, image_data)
+        except Exception as e:
+            cache_file = self.get_cache_filename(objid, survey_name)
+            print(f"Error saving cache file {cache_file}: {e}")
     
     def load_cutout_from_cache(self, objid, survey_name):
         """Load cutout from cache if exists."""
         if not self.buffer_dir:
             return None
-        cache_file = self.get_cache_filename(objid, survey_name)
-        if cache_file and cache_file.exists():
-            try:
-                image = Image.open(cache_file)
-                return np.array(image)
-            except Exception as e:
-                print(f"Error loading cache file {cache_file}: {e}")
+        try:
+            return load_cutout_from_cache(self.buffer_dir, objid, survey_name)
+        except Exception as e:
+            cache_file = self.get_cache_filename(objid, survey_name)
+            print(f"Error loading cache file {cache_file}: {e}")
         return None
     
     def prefetch_cutouts_background(self, spectrum_list, current_index, num_prefetch=None):
@@ -437,7 +432,7 @@ class ImageCutoutWidget(QWidget):
                 end_index = len(spectrum_list)
             else:
                 end_index = min(current_index + num_prefetch + 1, len(spectrum_list))
-            surveys = [("CDS/P/Euclid/Q1/color", "Euclid composite")]
+            surveys = list(EUCLID_CUTOUT_SURVEYS)
             
             for i in range(current_index + 1, end_index):
                 try:
@@ -450,25 +445,29 @@ class ImageCutoutWidget(QWidget):
                         
                     # Check if cutout already exists
                     for survey, _ in surveys:
+                        if not is_valid_cutout_target(objid, ra, dec):
+                            continue
                         if self.load_cutout_from_cache(objid, survey) is not None:
                             continue  # Already cached
                             
                         # Download cutout
                         try:
-                            result = hips2fits.query(
-                                hips=survey,
-                                width=150, height=150,
-                                ra=Longitude(ra * u.deg),
-                                dec=Latitude(dec * u.deg), 
-                                fov=Angle(10 * u.arcsec),  # Default size
-                                projection="CAR",
-                                format='jpg'
+                            result = fetch_cutout(
+                                ra=ra,
+                                dec=dec,
+                                survey_name=survey,
+                                size_arcsec=10,
+                                width=150,
+                                height=150,
                             )
                             if result is not None:
                                 self.save_cutout_to_cache(objid, survey, result)
+                            time.sleep(0.1)
                                 
                         except Exception as e:
-                            print(f"Error prefetching cutout for object {objid}: {e}")
+                            if not is_no_data_error(e):
+                                print(f"Error prefetching cutout for object {objid}: {e}")
+                            time.sleep(0.1)
                             
                 except Exception as e:
                     print(f"Error processing spectrum {i} for prefetch: {e}")
@@ -1293,12 +1292,14 @@ class PGSpecPlotAppEnhanced(QApplication):
             return s
 
     def __init__(self, spectra, SpecClass=SpecEuclid1d,
-                 output_file='vi_output.csv', z_max=5.0, load_history=False, euclid_fits=None):
+                 output_file='vi_output.csv', z_max=5.0, load_history=False,
+                 euclid_fits=None, cutout_buffer_dir=None, enable_background_prefetch=True):
         super().__init__(sys.argv)
         self.output_file = output_file
         self.spectra = spectra
         self.SpecClass = SpecClass
         self.euclid_fits = euclid_fits
+        self.enable_background_prefetch = enable_background_prefetch
 
         if load_history and os.path.exists(self.output_file):
             print(f"Loading history from {self.output_file} ...")
@@ -1333,7 +1334,9 @@ class PGSpecPlotAppEnhanced(QApplication):
         self.len_list = self.plot.len_list
         
         # Create buffer directory for cutouts
-        if isinstance(spectra, str):  # Single FITS file
+        if cutout_buffer_dir is not None:
+            buffer_dir = Path(cutout_buffer_dir)
+        elif isinstance(spectra, str):  # Single FITS file
             buffer_dir = Path(spectra).parent / "cutout_buffer"
         else:  # List of files
             buffer_dir = Path(spectra[0]).parent / "cutout_buffer"
@@ -1349,8 +1352,9 @@ class PGSpecPlotAppEnhanced(QApplication):
             objid = getattr(self.plot.spec, 'objid', None)
             self.cutout_widget.load_online_cutouts(self.plot.spec.ra, self.plot.spec.dec, objid)
             
-        # Start background prefetching for next 50 objects
-        self.start_background_prefetch()
+        # Start background prefetching for next objects
+        if self.enable_background_prefetch:
+            self.start_background_prefetch()
         
         self.make_layout()
         self.aboutToQuit.connect(self.save_dict_todf)
@@ -1672,8 +1676,126 @@ class PGSpecPlotThreadEnhanced(QThread):
             raise ValueError("Either 'spectra' or 'specfile' must be provided")
             
         self.SpecClass = SpecClass
-        self.app = PGSpecPlotAppEnhanced(self.spectra, self.SpecClass, **kwargs)
+        self.app = None
+        self._skip_window = False
+        self._disable_background_prefetch = False
+        self.buffer_dir = self._resolve_buffer_dir(self.spectra)
+
+        if self._should_offer_predownload(self.buffer_dir):
+            if self._prompt_for_bulk_download():
+                self._skip_window = self._run_bulk_predownload()
+
+        if not self._skip_window:
+            if "enable_background_prefetch" not in kwargs:
+                kwargs["enable_background_prefetch"] = not self._disable_background_prefetch
+            self.app = PGSpecPlotAppEnhanced(
+                self.spectra,
+                self.SpecClass,
+                cutout_buffer_dir=self.buffer_dir,
+                **kwargs,
+            )
+
+    @staticmethod
+    def _resolve_buffer_dir(spectra):
+        """Resolve cutout buffer path from input spectra."""
+        if isinstance(spectra, str):
+            return Path(spectra).parent / "cutout_buffer"
+        return Path(spectra[0]).parent / "cutout_buffer"
+
+    @staticmethod
+    def _should_offer_predownload(buffer_dir):
+        """Offer predownload only when cutout buffer does not exist yet."""
+        return buffer_dir is not None and not Path(buffer_dir).exists()
+
+    @staticmethod
+    def _prompt_for_bulk_download():
+        """Prompt user in CLI to decide whether to pre-download all cutouts."""
+        if not sys.stdin or not sys.stdin.isatty():
+            print("No interactive terminal detected; continuing with on-the-fly cutout download.")
+            return False
+
+        while True:
+            answer = input(
+                "No 'cutout_buffer' folder found. Download all cutouts before launching the Qt window? [y/N]: "
+            ).strip().lower()
+            if answer in ("y", "yes"):
+                return True
+            if answer in ("", "n", "no"):
+                return False
+            print("Please answer 'y' or 'n'.")
+
+    def _collect_cutout_records(self):
+        """Collect objid/ra/dec records for all spectra."""
+        records = []
+        if isinstance(self.spectra, (list, tuple, np.ndarray)):
+            input_list = list(self.spectra)
+            for filename in input_list:
+                try:
+                    spec = self.SpecClass(filename)
+                    objid = getattr(spec, "objid", None)
+                    ra = getattr(spec, "ra", None)
+                    dec = getattr(spec, "dec", None)
+                    records.append({"objid": objid, "ra": ra, "dec": dec})
+                except Exception as exc:
+                    print(f"Failed to load spectrum '{filename}' for predownload: {exc}")
+            return records
+
+        try:
+            if hasattr(self.SpecClass, "count_in_file"):
+                total = int(self.SpecClass.count_in_file(self.spectra))
+            else:
+                with fits.open(self.spectra) as hdul:
+                    total = len(hdul) - 1
+        except Exception as exc:
+            print(f"Failed to determine spectrum count for predownload: {exc}")
+            return records
+
+        for ext in range(1, total + 1):
+            try:
+                spec = self.SpecClass(self.spectra, ext=ext)
+                objid = getattr(spec, "objid", None)
+                ra = getattr(spec, "ra", None)
+                dec = getattr(spec, "dec", None)
+                records.append({"objid": objid, "ra": ra, "dec": dec})
+            except Exception as exc:
+                print(f"Failed to load spectrum ext={ext} for predownload: {exc}")
+        return records
+
+    def _run_bulk_predownload(self):
+        """Run one-time bulk predownload and ask user to restart."""
+        print(f"Preparing bulk cutout download into '{self.buffer_dir}' ...")
+        records = self._collect_cutout_records()
+        if not records:
+            print("No valid spectra records found for bulk predownload. Continuing with on-the-fly downloads.")
+            return False
+
+        summary = predownload_cutouts(
+            records=records,
+            buffer_dir=self.buffer_dir,
+            surveys=EUCLID_CUTOUT_SURVEYS,
+            size_arcsec=10,
+            progress_callback=print_cli_progress,
+        )
+        attempted = max(summary["total"] - summary["skipped"], 0)
+        failed_total = summary["failed"] + summary["no_data"]
+        fail_rate = failed_total / attempted if attempted > 0 else 0.0
+        print(
+            "Bulk cutout download finished. "
+            f"downloaded={summary['downloaded']}, skipped={summary['skipped']}, "
+            f"no_data={summary['no_data']}, failed={summary['failed']}."
+        )
+        if fail_rate >= 0.5:
+            print(
+                "Bulk predownload failure rate is high; continuing now with on-the-fly downloads "
+                "and disabling background prefetch for this run."
+            )
+            self._disable_background_prefetch = True
+            return False
+        print("Please run the program again to launch the Qt window with the prebuilt cutout buffer.")
+        return True
 
     def run(self):
+        if self._skip_window:
+            return
         exit_code = self.app.exec_()
         sys.exit(exit_code)
