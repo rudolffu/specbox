@@ -42,11 +42,32 @@ GPLv3. See `LICENSE`.
 - `pillow` (PIL)
 - `astroquery`
 
-To install the latest version of specbox, run the following command in your terminal:
+It is recommended to set up an isolated environment before installing (choose either option A or B):
 
 ```bash
-git clone https://github.com/rudolffu/specbox.git 
-# or git clone https://gitee.com/rudolffu/specbox.git 
+# Option A: Python venv
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+```
+
+```bash
+# Option B: conda
+conda create -n specbox python=3.13 -y
+conda activate specbox
+python -m pip install --upgrade pip
+```
+
+Install the stable release from PyPI (recommended):
+
+```bash
+python -m pip install specbox
+```
+
+To install a pre-release/development version from source:
+
+```bash
+git clone https://github.com/rudolffu/specbox.git  
 cd specbox
 python -m pip install .
 ```
@@ -121,4 +142,4 @@ viewer.run()
 Notes:
 - Results CSV includes `targetid` and `data_release` (when available from the input table).
 - The enhanced viewer has a `Save PNG` button that writes screenshots to `./saved_pngs/`.
-<img src="specbox/docs/figs/PGSpecPlotThread_example.jpg" width="600">
+<img src="specbox/docs/figs/PGSpecPlotThreadEnhanced_example.jpg" width="600">
