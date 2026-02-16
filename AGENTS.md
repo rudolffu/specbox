@@ -48,3 +48,13 @@
 ## Agent Notes
 - These guidelines apply repo‑wide. When editing files, preserve the existing layout and public APIs under `specbox/` unless a change is documented and versioned.
 - Keep docs in sync: whenever updating `README.md` (especially dependencies, install or usage), mirror relevant changes in `specbox/docs/VITUTORIAL.md` in the same PR.
+
+## Planned Refactor: Cutout Download Workflow
+1. Extract cutout download/cache logic from `specbox/qtmodule/qtmodule_enhanced.py` into a dedicated helper module (proposed: `specbox/auxmodule/cutout_download.py`).
+2. Keep Qt/UI code focused on interaction flow; call helper functions for both pre-download and on-the-fly download paths.
+3. Before opening the Qt window, check whether `cutout_buffer/` exists.
+4. If `cutout_buffer/` does not exist, prompt in CLI whether to pre-download all cutouts.
+5. If user answers yes, create `cutout_buffer/`, download all cutouts with CLI progress bar, then exit with instruction to restart the program.
+6. If user answers no, continue current on-the-fly download strategy.
+7. Add robust behavior for failures/non-interactive stdin (fallback to on-the-fly if prompt cannot be answered).
+8. Validate with smoke runs and keep docs/help text aligned with the new behavior.
