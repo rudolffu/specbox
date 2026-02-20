@@ -79,6 +79,8 @@ _TEMPLATE_EMISSION_LINES = [
 
 class ImageCutoutWidget(QWidget):
     """Widget for displaying astronomical image cutouts."""
+    QA_CONTAMINATION_BIT = 1
+    QA_UNUSABLE_BIT = 2
     
     def __init__(self, buffer_dir=None):
         super().__init__()
@@ -114,17 +116,31 @@ class ImageCutoutWidget(QWidget):
         # layout.addWidget(scroll)
         layout.addWidget(self.images_widget)
 
-        # Title with toggle
-        header_layout = QHBoxLayout()
-        title = QLabel("Image Cutouts")
-        title.setFont(QFont("Arial", 12, QFont.Bold))
-        header_layout.addWidget(title)
+        # Title + QA + toggle
+        header_layout = QVBoxLayout()
+        qa_group = QGroupBox("Spec-image QA:")
+        qa_group.setFont(QFont("Arial", 14, QFont.Bold))
+        qa_layout = QVBoxLayout()
+        self.qa_contamination_cb = QCheckBox("Contamination from nearby\nsource(s)")
+        self.qa_unusable_cb = QCheckBox("Unusable spectrum due to\ndominating artifacts")
+        self.qa_contamination_cb.setFont(QFont("Arial", 13))
+        self.qa_unusable_cb.setFont(QFont("Arial", 13))
+        qa_checkbox_style = "QCheckBox::indicator { width: 24px; height: 24px; }"
+        self.qa_contamination_cb.setStyleSheet(qa_checkbox_style)
+        self.qa_unusable_cb.setStyleSheet(qa_checkbox_style)
+        qa_layout.addWidget(self.qa_contamination_cb)
+        qa_layout.addWidget(self.qa_unusable_cb)
+        qa_group.setLayout(qa_layout)
+        header_layout.addWidget(qa_group)
         
         # Toggle for auto-fetch
-        self.auto_fetch_cb = QCheckBox("Auto-fetch")
+        auto_fetch_row = QHBoxLayout()
+        self.auto_fetch_cb = QCheckBox("Auto-fetch image cutouts")
         self.auto_fetch_cb.setChecked(True)
         self.auto_fetch_cb.setToolTip("Automatically fetch images when coordinates change")
-        header_layout.addWidget(self.auto_fetch_cb)
+        auto_fetch_row.addWidget(self.auto_fetch_cb)
+        auto_fetch_row.addStretch()
+        header_layout.addLayout(auto_fetch_row)
         
         header_widget = QWidget()
         header_widget.setLayout(header_layout)
@@ -151,6 +167,26 @@ class ImageCutoutWidget(QWidget):
         self.progress.setVisible(False)
         layout.addWidget(self.progress)
         self.setLayout(layout)
+
+    def get_qa_flag(self):
+        flag = 0
+        if self.qa_contamination_cb.isChecked():
+            flag |= self.QA_CONTAMINATION_BIT
+        if self.qa_unusable_cb.isChecked():
+            flag |= self.QA_UNUSABLE_BIT
+        return int(flag)
+
+    def set_qa_flag(self, qa_flag):
+        try:
+            flag = int(qa_flag)
+        except Exception:
+            flag = 0
+        self.qa_contamination_cb.blockSignals(True)
+        self.qa_unusable_cb.blockSignals(True)
+        self.qa_contamination_cb.setChecked((flag & self.QA_CONTAMINATION_BIT) != 0)
+        self.qa_unusable_cb.setChecked((flag & self.QA_UNUSABLE_BIT) != 0)
+        self.qa_contamination_cb.blockSignals(False)
+        self.qa_unusable_cb.blockSignals(False)
         
     # Removed load_local_cutouts method since we removed the Load Local button
     
@@ -650,6 +686,8 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             spec.objid = self.counter
         if not hasattr(spec, 'objname'):
             spec.objname = 'Unknown'
+        if not hasattr(spec, 'qa_flag'):
+            spec.qa_flag = 0
 
     def update_slider_and_spin(self):
         spec = self.spec
@@ -1067,6 +1105,8 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         
         if spec.objid in self.history:
             spec.z_vi = self.history[spec.objid][4]
+            if len(self.history[spec.objid]) > 7:
+                spec.qa_flag = self.history[spec.objid][7]
             class_vi = self.history[spec.objid][3]
             print(f"\tVisual class from history: {class_vi}.")
             
@@ -1099,6 +1139,8 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             
             if spec.objid in self.history:
                 spec.z_vi = self.history[spec.objid][4]
+                if len(self.history[spec.objid]) > 7:
+                    spec.qa_flag = self.history[spec.objid][7]
                 class_vi = self.history[spec.objid][3]
                 print(f"\tVisual class from history: {class_vi}.")
                 
@@ -1152,7 +1194,8 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         def _history_payload(class_vi, z_vi):
             targetid = getattr(spec, 'targetid', None)
             data_release = getattr(spec, 'data_release', None)
-            return [spec.objname, spec.ra, spec.dec, class_vi, z_vi, targetid, data_release]
+            qa_flag = getattr(spec, 'qa_flag', 0)
+            return [spec.objname, spec.ra, spec.dec, class_vi, z_vi, targetid, data_release, qa_flag]
 
         if event.key() == Qt.Key_Q:
             if spec.objid not in self.history:
@@ -1160,10 +1203,11 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             else:
                 # Update existing entry with current z_vi (preserves classification but updates redshift)
                 self.history[spec.objid][4] = spec.z_vi
-                if len(self.history[spec.objid]) < 7:
-                    self.history[spec.objid].extend([None] * (7 - len(self.history[spec.objid])))
+                if len(self.history[spec.objid]) < 8:
+                    self.history[spec.objid].extend([None] * (8 - len(self.history[spec.objid])))
                 self.history[spec.objid][5] = self.history[spec.objid][5] if self.history[spec.objid][5] is not None else getattr(spec, 'targetid', None)
                 self.history[spec.objid][6] = self.history[spec.objid][6] if self.history[spec.objid][6] is not None else getattr(spec, 'data_release', None)
+                self.history[spec.objid][7] = getattr(spec, 'qa_flag', 0)
             if self.counter < self.len_list:
                 self.clear()
                 self.plot_next()
@@ -1179,6 +1223,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                         continue
                     targetid = v[5] if len(v) > 5 else None
                     data_release = v[6] if len(v) > 6 else None
+                    qa_flag = v[7] if len(v) > 7 else 0
                     rows.append(
                         {
                             "objid": objid_key,
@@ -1189,6 +1234,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                             "z_vi": v[4],
                             "targetid": targetid,
                             "data_release": data_release,
+                            "qa_flag": qa_flag,
                         }
                     )
                 df_new = pd.DataFrame(rows)
@@ -1291,6 +1337,16 @@ class PGSpecPlotAppEnhanced(QApplication):
         except Exception:
             return s
 
+    @staticmethod
+    def _normalize_qa_flag(value):
+        """Normalize qa_flag loaded from CSV/history."""
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return 0
+        try:
+            return int(value)
+        except Exception:
+            return 0
+
     def __init__(self, spectra, SpecClass=SpecEuclid1d,
                  output_file='vi_output.csv', z_max=5.0, load_history=False,
                  euclid_fits=None, cutout_buffer_dir=None, enable_background_prefetch=True):
@@ -1306,11 +1362,19 @@ class PGSpecPlotAppEnhanced(QApplication):
             df = pd.read_csv(self.output_file)
             if 'vi_class' in df.columns:
                 df.rename(columns={'vi_class': 'class_vi'}, inplace=True)
+            if 'qa_flag' not in df.columns:
+                df['qa_flag'] = 0
+                try:
+                    df.to_csv(self.output_file, index=False)
+                    print("Added missing 'qa_flag' column to history file with default 0.")
+                except Exception as e:
+                    print(f"Could not persist new 'qa_flag' column to history file: {e}")
             history_dict = {}
             for _, row in df.iterrows():
                 objid = self._normalize_objid(row['objid'])
                 targetid = row['targetid'] if 'targetid' in df.columns else None
                 data_release = row['data_release'] if 'data_release' in df.columns else None
+                qa_flag = self._normalize_qa_flag(row['qa_flag']) if 'qa_flag' in df.columns else 0
                 history_dict[objid] = [
                     row.get('objname', 'Unknown'),
                     row.get('ra', np.nan),
@@ -1319,6 +1383,7 @@ class PGSpecPlotAppEnhanced(QApplication):
                     row.get('z_vi', np.nan),
                     targetid,
                     data_release,
+                    qa_flag,
                 ]
             initial_counter = df.shape[0]
         else:
@@ -1343,6 +1408,8 @@ class PGSpecPlotAppEnhanced(QApplication):
         
         # Create image cutout widget with buffer directory
         self.cutout_widget = ImageCutoutWidget(buffer_dir=buffer_dir)
+        self.cutout_widget.qa_contamination_cb.stateChanged.connect(self.on_qa_flag_changed)
+        self.cutout_widget.qa_unusable_cb.stateChanged.connect(self.on_qa_flag_changed)
         
         # Connect signals - need a wrapper to pass object ID
         self.plot.coordinate_changed.connect(self.on_coordinate_changed)
@@ -1351,6 +1418,7 @@ class PGSpecPlotAppEnhanced(QApplication):
         if hasattr(self.plot, 'spec') and hasattr(self.plot.spec, 'ra') and hasattr(self.plot.spec, 'dec'):
             objid = getattr(self.plot.spec, 'objid', None)
             self.cutout_widget.load_online_cutouts(self.plot.spec.ra, self.plot.spec.dec, objid)
+        self.sync_qa_checkbox_from_current_spec()
             
         # Start background prefetching for next objects
         if self.enable_background_prefetch:
@@ -1363,6 +1431,53 @@ class PGSpecPlotAppEnhanced(QApplication):
         """Handle coordinate changes and pass object ID to cutout widget."""
         objid = getattr(self.plot.spec, 'objid', None) if hasattr(self.plot, 'spec') else None
         self.cutout_widget.load_online_cutouts(ra, dec, objid)
+        self.sync_qa_checkbox_from_current_spec()
+
+    def sync_qa_checkbox_from_current_spec(self):
+        """Restore QA checkboxes from current spec/history."""
+        if not hasattr(self.plot, 'spec'):
+            return
+        spec = self.plot.spec
+        objid = getattr(spec, 'objid', None)
+        qa_flag = 0
+        if objid in self.plot.history and len(self.plot.history[objid]) > 7:
+            qa_flag = self._normalize_qa_flag(self.plot.history[objid][7])
+        else:
+            qa_flag = self._normalize_qa_flag(getattr(spec, 'qa_flag', 0))
+        spec.qa_flag = qa_flag
+        self.cutout_widget.set_qa_flag(qa_flag)
+
+    def on_qa_flag_changed(self, _state):
+        """Persist QA flag from checkbox selections into current spec/history."""
+        if not hasattr(self.plot, 'spec'):
+            return
+        spec = self.plot.spec
+        qa_flag = self.cutout_widget.get_qa_flag()
+        spec.qa_flag = qa_flag
+
+        objid = getattr(spec, 'objid', None)
+        if objid is None:
+            return
+
+        if objid not in self.plot.history:
+            targetid = getattr(spec, 'targetid', None)
+            data_release = getattr(spec, 'data_release', None)
+            self.plot.history[objid] = [
+                getattr(spec, 'objname', 'Unknown'),
+                getattr(spec, 'ra', np.nan),
+                getattr(spec, 'dec', np.nan),
+                'QSO(Default)',
+                getattr(spec, 'z_vi', 0.0),
+                targetid,
+                data_release,
+                qa_flag,
+            ]
+            return
+
+        row = self.plot.history[objid]
+        if len(row) < 8:
+            row.extend([None] * (8 - len(row)))
+        row[7] = qa_flag
     
     def start_background_prefetch(self):
         """Start background prefetching of cutouts for upcoming spectra."""
@@ -1522,6 +1637,7 @@ class PGSpecPlotAppEnhanced(QApplication):
     def keyPressEvent(self, event):
         """Forward keyboard events to plot widget."""
         self.plot.keyPressEvent(event)
+        self.sync_qa_checkbox_from_current_spec()
 
     def mousePressEvent(self, event):
         """Forward mouse events to plot widget."""
@@ -1645,6 +1761,7 @@ class PGSpecPlotAppEnhanced(QApplication):
                 continue
             targetid = v[5] if len(v) > 5 else None
             data_release = v[6] if len(v) > 6 else None
+            qa_flag = self._normalize_qa_flag(v[7]) if len(v) > 7 else 0
             rows.append(
                 {
                     "objid": objid_key,
@@ -1655,6 +1772,7 @@ class PGSpecPlotAppEnhanced(QApplication):
                     "z_vi": v[4],
                     "targetid": targetid,
                     "data_release": data_release,
+                    "qa_flag": qa_flag,
                 }
             )
         df_new = pd.DataFrame(rows)
