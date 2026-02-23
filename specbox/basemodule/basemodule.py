@@ -1143,6 +1143,79 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
     Class for reading 1D spectra from Euclid. 
     The datamodel of Q1 1D spectra is described in https://euclid.esac.esa.int/dr/q1/dpdd/sirdpd/dpcards/sir_combinedspectra.html.
     """
+    @staticmethod
+    def _parse_scaled_unit(unit_text, default_unit):
+        """Parse unit strings that may embed a numeric scale (e.g. ``10**-16 erg/s/cm2/Angstrom``)."""
+        if unit_text is None:
+            return 1.0, default_unit
+
+        unit_str = str(unit_text).strip()
+        if not unit_str:
+            return 1.0, default_unit
+
+        scale = 1.0
+        unit_expr = unit_str
+
+        match = re.match(r"^\s*(10\*\*\s*[+-]?\d+|[0-9]*\.?[0-9]+(?:[eE][+-]?\d+)?)\s*(.*)$", unit_str)
+        if match:
+            scale_token = match.group(1).replace(" ", "")
+            remainder = match.group(2).strip()
+            try:
+                if scale_token.startswith("10**"):
+                    exponent = int(scale_token.split("**", 1)[1])
+                    scale = float(10.0 ** exponent)
+                else:
+                    scale = float(scale_token)
+                unit_expr = remainder
+            except Exception:
+                scale = 1.0
+                unit_expr = unit_str
+
+        if not unit_expr:
+            return scale, default_unit
+
+        if unit_expr.lower() in {"number", "dimensionless", "dimensionless_unscaled"}:
+            return scale, u.dimensionless_unscaled
+
+        normalized = unit_expr.replace("Angstrom", "AA").replace("^", "**")
+        normalized = re.sub(r"\b(erg|cm|s|AA)(\d+)\b", r"\1**\2", normalized)
+        normalized = normalized.replace(" ", "")
+
+        # Convert repeated slash notation (e.g. erg/s/cm**2/AA) into a product form
+        # to avoid Astropy UnitsWarning about multiple slashes.
+        if "/" in normalized:
+            parts = [p for p in normalized.split("/") if p]
+            if len(parts) >= 2:
+                numerator = parts[0]
+                denominator_parts = []
+                for token in parts[1:]:
+                    m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)(\*\*([+-]?\d+))?$", token)
+                    if m:
+                        base = m.group(1)
+                        exponent = int(m.group(3)) if m.group(3) is not None else 1
+                        denominator_parts.append(f"{base}**{-exponent}")
+                    else:
+                        denominator_parts.append(f"({token})**-1")
+                normalized = "*".join([numerator] + denominator_parts)
+
+        try:
+            parsed_unit = u.Unit(normalized)
+        except Exception:
+            warnings.warn(
+                f"Could not parse Euclid unit '{unit_text}', falling back to {default_unit}.",
+                UserWarning,
+            )
+            parsed_unit = default_unit
+        return scale, parsed_unit
+
+    @staticmethod
+    def _get_column_unit(hdu, colname):
+        """Get a FITS table column unit string if available."""
+        try:
+            return hdu.columns[colname].unit
+        except Exception:
+            return None
+
     def __init__(self, filename=None, ext=None, extname=None, clip=True, good_pixels_only=False, redshift=None, *args, **kwargs):
         """
         Parameters
@@ -1210,6 +1283,9 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.bad_mask = None
         self.good_mask = None
         fscale = hdu.header.get('FSCALE', 1.0)
+        wave_scale, wave_unit = self._parse_scaled_unit(self._get_column_unit(hdu, 'WAVELENGTH'), u.Angstrom)
+        flux_scale, flux_unit = self._parse_scaled_unit(self._get_column_unit(hdu, 'SIGNAL'), u.erg / u.s / u.cm**2 / u.Angstrom)
+        var_scale, var_unit = self._parse_scaled_unit(self._get_column_unit(hdu, 'VAR'), flux_unit**2)
         wave = data['WAVELENGTH']
         flux = data['SIGNAL'] * fscale
         variance = data['VAR']
@@ -1228,9 +1304,11 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
                 "good_pixels_only=True requested, but MASK column is missing; using all pixels.",
                 UserWarning,
             )
-        self.wave = wave * u.Angstrom
-        self.flux = flux * u.erg / u.s / u.cm**2 / u.Angstrom
-        self.err = np.sqrt(variance) * fscale
+        self.wave_unit = wave_unit
+        self.flux_unit = flux_unit
+        self.wave = wave * wave_scale * wave_unit
+        self.flux = flux * flux_scale * flux_unit
+        self.err = np.sqrt(variance * var_scale) * (var_unit ** 0.5)
         self.spec = Spectrum(spectral_axis=self.wave, 
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
@@ -1241,8 +1319,8 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             self.objid = hdu.name  # fallback if conversion fails
         self.filename = filename
         self.ext = ext
-        self.ra = hdu.header.get('RA', 0.0)
-        self.dec = hdu.header.get('DEC', 0.0)
+        self.ra = hdu.header.get('RA', hdu.header.get('RA_OBJ', 0.0))
+        self.dec = hdu.header.get('DEC', hdu.header.get('DEC_OBJ', 0.0))
         self.z_ph = hdu.header.get('Z_PH', 0.0)
         self.z_gaia = hdu.header.get('Z_GAIA', 0.0)
         self.z_vi = hdu.header.get('Z_VI', 0.0)

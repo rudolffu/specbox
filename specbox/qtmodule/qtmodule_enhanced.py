@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, QThread, Signal, QTimer, QThreadPool, QRunnable
 from PySide6.QtWidgets import (QApplication, QFrame, QWidget, QSlider, QHBoxLayout, 
                                QVBoxLayout, QGridLayout, QDoubleSpinBox, QPushButton, 
                                QLabel, QButtonGroup, QRadioButton, QGroupBox, 
-                               QFileDialog, QMessageBox, QComboBox, QProgressBar,
+                               QFileDialog, QMessageBox, QComboBox, QProgressBar, QSpinBox,
                                QScrollArea, QCheckBox, QDialog, QTextEdit, QSplitter)
 import sys
 from ..basemodule import *
@@ -1157,6 +1157,44 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         else:
             print("No previous spectrum to plot.")
 
+    def jump_to_spectrum(self, index_one_based):
+        """Jump directly to a spectrum by 1-based index."""
+        try:
+            index_one_based = int(index_one_based)
+        except Exception:
+            print(f"Invalid index: {index_one_based}")
+            return
+
+        if index_one_based < 1 or index_one_based > self.len_list:
+            print(f"Index out of range: {index_one_based}. Valid range is 1..{self.len_list}.")
+            return
+
+        self.clear()
+        target_zero_based = index_one_based - 1
+        if self.speclist is not None:
+            filename = self.speclist[target_zero_based]
+            spec = self.SpecClass(filename)
+        else:
+            spec = self.SpecClass(self.specfile, ext=target_zero_based + 1)
+
+        self.spec = spec
+        self._ensure_spec_defaults(spec)
+
+        if spec.objid in self.history:
+            spec.z_vi = self.history[spec.objid][4]
+            if len(self.history[spec.objid]) > 7:
+                spec.qa_flag = self.history[spec.objid][7]
+            class_vi = self.history[spec.objid][3]
+            print(f"\tVisual class from history: {class_vi}.")
+
+        self.counter = index_one_based
+        self.update_slider_and_spin()
+        self._displaying_spectrum_number = index_one_based
+        self.plot_single()
+
+        if hasattr(self.spec, 'ra') and hasattr(self.spec, 'dec'):
+            self.coordinate_changed.emit(self.spec.ra, self.spec.dec)
+
     def change_template(self, template_name):
         """Change current template."""
         if template_name in self.template_manager.get_available_templates():
@@ -1556,6 +1594,19 @@ class PGSpecPlotAppEnhanced(QApplication):
             self.image_toggle_btn.setCheckable(True)
             self.image_toggle_btn.setMaximumHeight(35)  # Make button more compact
             toolbar_layout.addWidget(self.image_toggle_btn)
+
+            toolbar_layout.addWidget(QLabel("Go to index:"))
+            self.goto_index_spin = QSpinBox()
+            self.goto_index_spin.setMinimum(1)
+            self.goto_index_spin.setMaximum(self.len_list)
+            self.goto_index_spin.setValue(1)
+            self.goto_index_spin.setMaximumHeight(35)
+            toolbar_layout.addWidget(self.goto_index_spin)
+
+            self.goto_index_btn = QPushButton("Go")
+            self.goto_index_btn.setMaximumHeight(35)
+            self.goto_index_btn.clicked.connect(self.go_to_index)
+            toolbar_layout.addWidget(self.goto_index_btn)
             
             # Add spacer
             toolbar_layout.addStretch()
@@ -1630,6 +1681,7 @@ class PGSpecPlotAppEnhanced(QApplication):
             layout.addWidget(main_splitter, row=2, col=0, colspan=2)
             
             self.main_splitter = main_splitter  # Store reference for toggle
+            self._update_go_to_controls()
             
         self.layout = layout
         self.layout.show()
@@ -1638,6 +1690,33 @@ class PGSpecPlotAppEnhanced(QApplication):
         """Forward keyboard events to plot widget."""
         self.plot.keyPressEvent(event)
         self.sync_qa_checkbox_from_current_spec()
+        self._update_go_to_controls()
+
+    def _current_index_one_based(self):
+        if hasattr(self.plot, "_displaying_spectrum_number"):
+            return int(self.plot._displaying_spectrum_number)
+        counter = int(getattr(self.plot, "counter", 1))
+        if counter < 1:
+            return 1
+        if counter > self.len_list:
+            return self.len_list
+        return counter
+
+    def _update_go_to_controls(self):
+        if not hasattr(self, "goto_index_spin"):
+            return
+        current_idx = self._current_index_one_based()
+        self.goto_index_spin.blockSignals(True)
+        self.goto_index_spin.setValue(current_idx)
+        self.goto_index_spin.blockSignals(False)
+
+    def go_to_index(self):
+        if not hasattr(self, "goto_index_spin"):
+            return
+        index_one_based = int(self.goto_index_spin.value())
+        self.plot.jump_to_spectrum(index_one_based)
+        self.sync_qa_checkbox_from_current_spec()
+        self._update_go_to_controls()
 
     def mousePressEvent(self, event):
         """Forward mouse events to plot widget."""
