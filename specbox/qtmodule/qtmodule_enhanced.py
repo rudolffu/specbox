@@ -912,6 +912,11 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         z_gaia = getattr(spec, 'z_gaia', None)
         objname = getattr(spec, 'objname', 'Unknown')
         objid = getattr(spec, 'objid', 'Unknown')
+        class_vi = None
+        if objid in self.history and len(self.history[objid]) > 3:
+            class_vi = self.history[objid][3]
+        if class_vi in (None, ""):
+            class_vi = getattr(spec, "class_vi", None)
 
         def _fmt_z(label, value, *, hide_zero=True):
             if value is None:
@@ -946,6 +951,8 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             if targetid not in (None, "", 0):
                 parts.append(f"targetid: {targetid}")
         parts.append(_fmt_z("z_vi", z_vi, hide_zero=False) or "z_vi = -")
+        if class_vi not in (None, ""):
+            parts.append(f"class_vi: {class_vi}")
 
         if 'SpecSparcl' in globals() and isinstance(spec, SpecSparcl):
             dr = str(getattr(spec, 'data_release', '') or '')
@@ -1281,18 +1288,23 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         elif event.key() == Qt.Key_S:
             print("\tClass: STAR.")
             self.history[spec.objid] = _history_payload('STAR', 0.0)
+            self.update_spectrum_info_label()
         elif event.key() == Qt.Key_G:
             print("\tClass: GALAXY.")
             self.history[spec.objid] = _history_payload('GALAXY', spec.z_vi)
+            self.update_spectrum_info_label()
         elif event.key() == Qt.Key_A:
             print("\tClass: QSO(AGN).")
             self.history[spec.objid] = _history_payload('QSO', spec.z_vi)
+            self.update_spectrum_info_label()
         elif event.key() == Qt.Key_U:
             print("\tClass: UNKNOWN.")
             self.history[spec.objid] = _history_payload('UNKNOWN', 0.0)
+            self.update_spectrum_info_label()
         elif event.key() == Qt.Key_L:
             print("\tClass: LIKELY/Unusual QSO.")
             self.history[spec.objid] = _history_payload('LIKELY', spec.z_vi)
+            self.update_spectrum_info_label()
         if event.key() == Qt.Key_R:
             self.clear()
             self.plot_single()
