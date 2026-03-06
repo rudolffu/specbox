@@ -1145,21 +1145,30 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
     """
     @staticmethod
     def _parse_scaled_unit(unit_text, default_unit):
-        """Parse unit strings that may embed a numeric scale (e.g. ``10**-16 erg/s/cm2/Angstrom``)."""
+        """Parse unit strings that may embed a numeric scale.
+
+        Returns
+        -------
+        tuple
+            ``(scale, unit, has_embedded_scale)`` where ``has_embedded_scale`` is
+            True when a leading numeric token is present in the original unit text.
+        """
         if unit_text is None:
-            return 1.0, default_unit
+            return 1.0, default_unit, False
 
         unit_str = str(unit_text).strip()
         if not unit_str:
-            return 1.0, default_unit
+            return 1.0, default_unit, False
 
         scale = 1.0
         unit_expr = unit_str
+        has_embedded_scale = False
 
         match = re.match(r"^\s*(10\*\*\s*[+-]?\d+|[0-9]*\.?[0-9]+(?:[eE][+-]?\d+)?)\s*(.*)$", unit_str)
         if match:
             scale_token = match.group(1).replace(" ", "")
             remainder = match.group(2).strip()
+            has_embedded_scale = True
             try:
                 if scale_token.startswith("10**"):
                     exponent = int(scale_token.split("**", 1)[1])
@@ -1170,12 +1179,13 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             except Exception:
                 scale = 1.0
                 unit_expr = unit_str
+                has_embedded_scale = False
 
         if not unit_expr:
-            return scale, default_unit
+            return scale, default_unit, has_embedded_scale
 
         if unit_expr.lower() in {"number", "dimensionless", "dimensionless_unscaled"}:
-            return scale, u.dimensionless_unscaled
+            return scale, u.dimensionless_unscaled, has_embedded_scale
 
         normalized = unit_expr.replace("Angstrom", "AA").replace("^", "**")
         normalized = re.sub(r"\b(erg|cm|s|AA)(\d+)\b", r"\1**\2", normalized)
@@ -1206,7 +1216,7 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
                 UserWarning,
             )
             parsed_unit = default_unit
-        return scale, parsed_unit
+        return scale, parsed_unit, has_embedded_scale
 
     @staticmethod
     def _get_column_unit(hdu, colname):
@@ -1216,7 +1226,23 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         except Exception:
             return None
 
-    def __init__(self, filename=None, ext=None, extname=None, clip=True, good_pixels_only=False, redshift=None, *args, **kwargs):
+    @staticmethod
+    def _clip_bounds_from_lrange(lrange, n_bins):
+        """Return clipping bounds (start, stop) for known Euclid arms."""
+        label = str(lrange).strip().upper() if lrange is not None else ""
+        if label == "BGS":
+            return 62, 411
+        if label == "RGS":
+            return 11, 511
+        # Fallback by length for files lacking LRANGE.
+        if n_bins == 433:
+            return 62, 411
+        if n_bins == 531:
+            return 11, 511
+        # Preserve legacy behavior for unknown layouts.
+        return 11, min(511, int(n_bins))
+
+    def __init__(self, filename=None, ext=None, extname=None, clip=True, good_pixels_only=False, redshift=None, lrange=None, *args, **kwargs):
         """
         Parameters
         ----------
@@ -1232,6 +1258,9 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             good_pixels_only : bool
                 If True, keep only recommended pixels according to Euclid MASK flags.
                 Pixels are considered bad when ``MASK`` is odd or ``MASK >= 64``.
+            lrange : str, optional
+                Arm label used for clipping policy (e.g. ``'BGS'`` or ``'RGS'``).
+                If None, ``LRANGE`` is read from the HDU header.
         """
         super().__init__(*args, **kwargs)
         self.wave_unit=u.AA
@@ -1242,10 +1271,11 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.redshift = redshift if redshift is not None else self.redshift
         self.telescope = 'Euclid'
         self.good_pixels_only = good_pixels_only
+        self.lrange = lrange
         if filename is not None:
-            self.read(filename, ext, extname, clip, good_pixels_only=good_pixels_only, **kwargs)
+            self.read(filename, ext, extname, clip, good_pixels_only=good_pixels_only, lrange=lrange, **kwargs)
         
-    def read(self, filename, ext=None, extname=None, clip=True, good_pixels_only=False, **kwargs):
+    def read(self, filename, ext=None, extname=None, clip=True, good_pixels_only=False, lrange=None, **kwargs):
         """
         Read the Euclid 1D spectrum.
         Parameters
@@ -1262,6 +1292,9 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             good_pixels_only : bool
                 If True, keep only recommended pixels according to Euclid MASK flags.
                 Pixels are considered bad when ``MASK`` is odd or ``MASK >= 64``.
+            lrange : str, optional
+                Arm label used for clipping policy (e.g. ``'BGS'`` or ``'RGS'``).
+                If None, ``LRANGE`` is read from the HDU header.
         """
         hdul = fits.open(filename)
         if extname is None and ext is None:
@@ -1274,8 +1307,11 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             hdu = hdul[ext].copy()
         hdul.close()
         data = hdu.data
+        header_lrange = hdu.header.get('LRANGE', hdu.header.get('LAMBRANG', None))
+        self.lrange = lrange if lrange is not None else header_lrange
         if clip:
-            data = data[11:511]
+            start, stop = self._clip_bounds_from_lrange(self.lrange, len(data))
+            data = data[start:stop]
         self.good_pixels_only = good_pixels_only
         self.hdu = hdu
         self.data = data
@@ -1283,11 +1319,38 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.bad_mask = None
         self.good_mask = None
         fscale = hdu.header.get('FSCALE', 1.0)
-        wave_scale, wave_unit = self._parse_scaled_unit(self._get_column_unit(hdu, 'WAVELENGTH'), u.Angstrom)
-        flux_scale, flux_unit = self._parse_scaled_unit(self._get_column_unit(hdu, 'SIGNAL'), u.erg / u.s / u.cm**2 / u.Angstrom)
-        var_scale, var_unit = self._parse_scaled_unit(self._get_column_unit(hdu, 'VAR'), flux_unit**2)
+        wave_scale, wave_unit, _ = self._parse_scaled_unit(self._get_column_unit(hdu, 'WAVELENGTH'), u.Angstrom)
+        flux_scale_tunit, flux_unit, flux_has_embedded_scale = self._parse_scaled_unit(
+            self._get_column_unit(hdu, 'SIGNAL'),
+            u.erg / u.s / u.cm**2 / u.Angstrom,
+        )
+        var_scale_tunit, var_unit, var_has_embedded_scale = self._parse_scaled_unit(
+            self._get_column_unit(hdu, 'VAR'),
+            flux_unit**2,
+        )
+        if flux_has_embedded_scale:
+            flux_scale_effective = flux_scale_tunit
+        else:
+            flux_scale_effective = flux_scale_tunit * fscale
+
+        if var_has_embedded_scale:
+            var_scale_effective = var_scale_tunit
+        else:
+            var_scale_effective = var_scale_tunit * (fscale ** 2)
+
+        if flux_has_embedded_scale and (fscale is not None):
+            try:
+                fscale_float = float(fscale)
+            except Exception:
+                fscale_float = 1.0
+            if (not np.isclose(abs(fscale_float), 1.0)) and (not np.isclose(fscale_float, flux_scale_tunit)):
+                warnings.warn(
+                    f"Euclid spectrum has both FSCALE={fscale_float} and SIGNAL TUNIT scale={flux_scale_tunit}; "
+                    "using TUNIT scale for flux/variance.",
+                    UserWarning,
+                )
         wave = data['WAVELENGTH']
-        flux = data['SIGNAL'] * fscale
+        flux = data['SIGNAL']
         variance = data['VAR']
         if data.dtype.names is not None and 'MASK' in data.dtype.names:
             self.mask = np.asarray(data['MASK'])
@@ -1307,8 +1370,8 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.wave_unit = wave_unit
         self.flux_unit = flux_unit
         self.wave = wave * wave_scale * wave_unit
-        self.flux = flux * flux_scale * flux_unit
-        self.err = np.sqrt(variance * var_scale) * (var_unit ** 0.5)
+        self.flux = flux * flux_scale_effective * flux_unit
+        self.err = np.sqrt(variance * var_scale_effective) * (var_unit ** 0.5)
         self.spec = Spectrum(spectral_axis=self.wave, 
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
@@ -1339,3 +1402,366 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
     @z_vi.setter
     def z_vi(self, value):
         self._z_vi = value
+
+
+class SpecEuclid1dDual:
+    """
+    Container for paired Euclid 1D spectra (RGS + BGS).
+
+    This keeps ``SpecEuclid1d`` unchanged while enabling joint visualization
+    and combined-arm analysis workflows.
+    """
+
+    def __init__(
+        self,
+        rgs: Optional[SpecEuclid1d] = None,
+        bgs: Optional[SpecEuclid1d] = None,
+        rgs_filename: Optional[str] = None,
+        bgs_filename: Optional[str] = None,
+        rgs_ext: Optional[int] = None,
+        bgs_ext: Optional[int] = None,
+        rgs_extname: Optional[str] = None,
+        bgs_extname: Optional[str] = None,
+        clip: bool = True,
+        good_pixels_only: bool = False,
+        redshift: Optional[float] = None,
+    ):
+        self.rgs = rgs
+        self.bgs = bgs
+        self.redshift = redshift
+        self.arm_scale_bgs_to_rgs = 1.0
+        self.scale_method = "median_abs_overlap"
+        self.scale_status = "not_computed"
+        self.overlap_wmin = np.nan
+        self.overlap_wmax = np.nan
+        self.overlap_n_bgs = 0
+        self.overlap_n_rgs = 0
+        self.objid = None
+        self.ra = np.nan
+        self.dec = np.nan
+        self.consistency = {
+            "objid_match": None,
+            "ra_match": None,
+            "dec_match": None,
+        }
+
+        if self.rgs is None and rgs_filename is not None:
+            self.rgs = SpecEuclid1d(
+                filename=rgs_filename,
+                ext=rgs_ext,
+                extname=rgs_extname,
+                clip=clip,
+                good_pixels_only=good_pixels_only,
+                redshift=redshift,
+                lrange="RGS",
+            )
+        if self.bgs is None and bgs_filename is not None:
+            self.bgs = SpecEuclid1d(
+                filename=bgs_filename,
+                ext=bgs_ext,
+                extname=bgs_extname,
+                clip=clip,
+                good_pixels_only=good_pixels_only,
+                redshift=redshift,
+                lrange="BGS",
+            )
+        self._update_consistency_metadata()
+        self._compute_bgs_to_rgs_scale()
+
+    def _arm_arrays(self, arm: str):
+        spec = self.rgs if arm.upper() == "RGS" else self.bgs
+        if spec is None:
+            return None, None, None
+        wave = np.asarray(spec.wave.value if hasattr(spec.wave, "value") else spec.wave, dtype=float)
+        flux = np.asarray(spec.flux.value if hasattr(spec.flux, "value") else spec.flux, dtype=float)
+        err = np.asarray(spec.err.value if hasattr(spec.err, "value") else spec.err, dtype=float)
+        return wave, flux, err
+
+    def _arm_good_mask(self, arm: str):
+        spec = self.rgs if arm.upper() == "RGS" else self.bgs
+        wave, _, _ = self._arm_arrays(arm)
+        if spec is None or wave is None:
+            return None
+        if hasattr(spec, "good_mask") and spec.good_mask is not None:
+            gm = np.asarray(spec.good_mask, dtype=bool)
+            if len(gm) == len(wave):
+                return gm
+        return None
+
+    def _update_consistency_metadata(self):
+        rgs = self.rgs
+        bgs = self.bgs
+        if rgs is not None:
+            self.objid = getattr(rgs, "objid", None)
+            self.ra = float(getattr(rgs, "ra", np.nan))
+            self.dec = float(getattr(rgs, "dec", np.nan))
+        elif bgs is not None:
+            self.objid = getattr(bgs, "objid", None)
+            self.ra = float(getattr(bgs, "ra", np.nan))
+            self.dec = float(getattr(bgs, "dec", np.nan))
+
+        if rgs is not None and bgs is not None:
+            rgs_objid = getattr(rgs, "objid", None)
+            bgs_objid = getattr(bgs, "objid", None)
+            self.consistency["objid_match"] = (rgs_objid == bgs_objid)
+            rgs_ra = float(getattr(rgs, "ra", np.nan))
+            bgs_ra = float(getattr(bgs, "ra", np.nan))
+            rgs_dec = float(getattr(rgs, "dec", np.nan))
+            bgs_dec = float(getattr(bgs, "dec", np.nan))
+            self.consistency["ra_match"] = np.isfinite(rgs_ra) and np.isfinite(bgs_ra) and np.isclose(rgs_ra, bgs_ra, atol=1e-6)
+            self.consistency["dec_match"] = np.isfinite(rgs_dec) and np.isfinite(bgs_dec) and np.isclose(rgs_dec, bgs_dec, atol=1e-6)
+
+    def _compute_bgs_to_rgs_scale(self):
+        wb, fb, _ = self._arm_arrays("BGS")
+        wr, fr, _ = self._arm_arrays("RGS")
+        if wb is None or wr is None:
+            self.arm_scale_bgs_to_rgs = 1.0
+            self.scale_status = "missing_arm"
+            return self.arm_scale_bgs_to_rgs
+
+        owmin = max(np.nanmin(wb), np.nanmin(wr))
+        owmax = min(np.nanmax(wb), np.nanmax(wr))
+        self.overlap_wmin = float(owmin) if np.isfinite(owmin) else np.nan
+        self.overlap_wmax = float(owmax) if np.isfinite(owmax) else np.nan
+        if not np.isfinite(owmin) or not np.isfinite(owmax) or owmax <= owmin:
+            self.arm_scale_bgs_to_rgs = 1.0
+            self.scale_status = "no_overlap"
+            self.overlap_n_bgs = 0
+            self.overlap_n_rgs = 0
+            return self.arm_scale_bgs_to_rgs
+
+        mb = (wb >= owmin) & (wb <= owmax) & np.isfinite(fb)
+        mr = (wr >= owmin) & (wr <= owmax) & np.isfinite(fr)
+
+        gm_b = self._arm_good_mask("BGS")
+        gm_r = self._arm_good_mask("RGS")
+        if gm_b is not None:
+            mb &= gm_b
+        if gm_r is not None:
+            mr &= gm_r
+
+        self.overlap_n_bgs = int(np.sum(mb))
+        self.overlap_n_rgs = int(np.sum(mr))
+        if self.overlap_n_bgs < 5 or self.overlap_n_rgs < 5:
+            self.arm_scale_bgs_to_rgs = 1.0
+            self.scale_status = "insufficient_overlap_points"
+            return self.arm_scale_bgs_to_rgs
+
+        b_med = np.nanmedian(np.abs(fb[mb]))
+        r_med = np.nanmedian(np.abs(fr[mr]))
+        if not np.isfinite(b_med) or not np.isfinite(r_med) or b_med <= 0:
+            self.arm_scale_bgs_to_rgs = 1.0
+            self.scale_status = "invalid_overlap_stats"
+            return self.arm_scale_bgs_to_rgs
+
+        self.arm_scale_bgs_to_rgs = float(r_med / b_med)
+        self.scale_status = "ok"
+        return self.arm_scale_bgs_to_rgs
+
+    def _scaled_arm_arrays(self, arm: str):
+        wave, flux, err = self._arm_arrays(arm)
+        if wave is None:
+            return None, None, None
+        if arm.upper() == "BGS":
+            return wave, flux * self.arm_scale_bgs_to_rgs, err * self.arm_scale_bgs_to_rgs
+        return wave, flux, err
+
+    def plot_together(self, ax=None, stacked: bool = False, labels: bool = True):
+        """
+        Plot RGS and BGS together.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes, optional
+            Existing axes. If None, a new figure is created.
+        stacked : bool, default False
+            If True, plot in two stacked panels; otherwise overlay both arms.
+        labels : bool, default True
+            Add legend labels when True.
+        """
+        if ax is None:
+            if stacked:
+                fig, axes = plt.subplots(2, 1, sharex=True)
+                ax_rgs, ax_bgs = axes
+            else:
+                fig, ax = plt.subplots()
+                ax_rgs = ax_bgs = ax
+        else:
+            if stacked:
+                raise ValueError("stacked=True requires ax=None")
+            ax_rgs = ax_bgs = ax
+
+        rgs_wave, rgs_flux, _ = self._arm_arrays("RGS")
+        if rgs_wave is not None:
+            ax_rgs.plot(rgs_wave, rgs_flux, lw=1, c="tab:red", label="RGS")
+            ax_rgs.set_ylabel("Flux")
+
+        bgs_wave, bgs_flux, _ = self._scaled_arm_arrays("BGS")
+        if bgs_wave is not None:
+            ax_bgs.plot(bgs_wave, bgs_flux, lw=1, c="tab:blue", label="BGS")
+            ax_bgs.set_ylabel("Flux")
+
+        if stacked:
+            ax_bgs.set_xlabel("Wavelength (Angstrom)")
+            if labels:
+                if rgs_wave is not None:
+                    ax_rgs.legend()
+                if bgs_wave is not None:
+                    ax_bgs.legend()
+            return (ax_rgs, ax_bgs)
+
+        ax_rgs.set_xlabel("Wavelength (Angstrom)")
+        if labels:
+            ax_rgs.legend()
+        if np.isfinite(self.arm_scale_bgs_to_rgs):
+            ax_rgs.text(
+                0.02,
+                0.98,
+                f"BGS→RGS scale={self.arm_scale_bgs_to_rgs:.4g} ({self.scale_status})",
+                transform=ax_rgs.transAxes,
+                va="top",
+                ha="left",
+                fontsize=9,
+            )
+        return ax_rgs
+
+    def merge(self):
+        """
+        Build a merged wavelength grid from available arms.
+
+        Returns
+        -------
+        dict
+            Keys: ``wavelength``, ``flux``, ``err``, ``arm``.
+            ``arm`` labels each merged sample as ``RGS`` or ``BGS``.
+        """
+        wb, fb, eb = self._scaled_arm_arrays("BGS")
+        wr, fr, er = self._arm_arrays("RGS")
+        if wb is None and wr is None:
+            return {
+                "wavelength": np.array([]),
+                "flux": np.array([]),
+                "err": np.array([]),
+                "arm": np.array([]),
+                "scale_bgs_to_rgs": self.arm_scale_bgs_to_rgs,
+                "overlap_wmin": self.overlap_wmin,
+                "overlap_wmax": self.overlap_wmax,
+                "overlap_n_bgs": self.overlap_n_bgs,
+                "overlap_n_rgs": self.overlap_n_rgs,
+            }
+        if wb is None:
+            return {
+                "wavelength": wr.copy(),
+                "flux": fr.copy(),
+                "err": er.copy(),
+                "arm": np.array(["RGS"] * len(wr), dtype="U6"),
+                "scale_bgs_to_rgs": self.arm_scale_bgs_to_rgs,
+                "overlap_wmin": self.overlap_wmin,
+                "overlap_wmax": self.overlap_wmax,
+                "overlap_n_bgs": self.overlap_n_bgs,
+                "overlap_n_rgs": self.overlap_n_rgs,
+            }
+        if wr is None:
+            return {
+                "wavelength": wb.copy(),
+                "flux": fb.copy(),
+                "err": eb.copy(),
+                "arm": np.array(["BGS"] * len(wb), dtype="U6"),
+                "scale_bgs_to_rgs": self.arm_scale_bgs_to_rgs,
+                "overlap_wmin": self.overlap_wmin,
+                "overlap_wmax": self.overlap_wmax,
+                "overlap_n_bgs": self.overlap_n_bgs,
+                "overlap_n_rgs": self.overlap_n_rgs,
+            }
+
+        owmin = max(np.nanmin(wb), np.nanmin(wr))
+        owmax = min(np.nanmax(wb), np.nanmax(wr))
+        if not np.isfinite(owmin) or not np.isfinite(owmax) or owmax <= owmin:
+            wave = np.concatenate([wb, wr])
+            flux = np.concatenate([fb, fr])
+            err = np.concatenate([eb, er])
+            arm = np.array(["BGS"] * len(wb) + ["RGS"] * len(wr), dtype="U6")
+            idx = np.argsort(wave)
+            return {
+                "wavelength": wave[idx],
+                "flux": flux[idx],
+                "err": err[idx],
+                "arm": arm[idx],
+                "scale_bgs_to_rgs": self.arm_scale_bgs_to_rgs,
+                "overlap_wmin": self.overlap_wmin,
+                "overlap_wmax": self.overlap_wmax,
+                "overlap_n_bgs": self.overlap_n_bgs,
+                "overlap_n_rgs": self.overlap_n_rgs,
+            }
+
+        b_only = wb < owmin
+        r_only = wr > owmax
+        r_overlap = (wr >= owmin) & (wr <= owmax)
+
+        wr_o = wr[r_overlap]
+        fr_o = fr[r_overlap]
+        er_o = er[r_overlap]
+        fb_i = np.interp(wr_o, wb, fb, left=np.nan, right=np.nan)
+        eb_i = np.interp(wr_o, wb, eb, left=np.nan, right=np.nan)
+
+        w_r = np.where(np.isfinite(er_o) & (er_o > 0), 1.0 / (er_o ** 2), 0.0)
+        w_b = np.where(np.isfinite(eb_i) & (eb_i > 0), 1.0 / (eb_i ** 2), 0.0)
+        w_sum = w_r + w_b
+
+        f_merge = np.full_like(wr_o, np.nan, dtype=float)
+        e_merge = np.full_like(wr_o, np.nan, dtype=float)
+        good = w_sum > 0
+        if np.any(good):
+            f_merge[good] = (fr_o[good] * w_r[good] + fb_i[good] * w_b[good]) / w_sum[good]
+            e_merge[good] = np.sqrt(1.0 / w_sum[good])
+
+        use_r_only = (w_r > 0) & (w_b == 0)
+        use_b_only = (w_b > 0) & (w_r == 0)
+        f_merge[use_r_only] = fr_o[use_r_only]
+        e_merge[use_r_only] = er_o[use_r_only]
+        f_merge[use_b_only] = fb_i[use_b_only]
+        e_merge[use_b_only] = eb_i[use_b_only]
+
+        wave = np.concatenate([wb[b_only], wr_o, wr[r_only]])
+        flux = np.concatenate([fb[b_only], f_merge, fr[r_only]])
+        err = np.concatenate([eb[b_only], e_merge, er[r_only]])
+        arm = np.concatenate([
+            np.array(["BGS"] * int(np.sum(b_only)), dtype="U6"),
+            np.array(["MERGED"] * len(wr_o), dtype="U6"),
+            np.array(["RGS"] * int(np.sum(r_only)), dtype="U6"),
+        ])
+        idx = np.argsort(wave)
+        return {
+            "wavelength": wave[idx],
+            "flux": flux[idx],
+            "err": err[idx],
+            "arm": arm[idx],
+            "scale_bgs_to_rgs": self.arm_scale_bgs_to_rgs,
+            "overlap_wmin": self.overlap_wmin,
+            "overlap_wmax": self.overlap_wmax,
+            "overlap_n_bgs": self.overlap_n_bgs,
+            "overlap_n_rgs": self.overlap_n_rgs,
+        }
+
+    def for_redshift(self):
+        """
+        Return arm arrays plus merged view for redshift measurements.
+        """
+        merged = self.merge()
+        rgs_wave, rgs_flux, rgs_err = self._arm_arrays("RGS")
+        bgs_wave_raw, bgs_flux_raw, bgs_err_raw = self._arm_arrays("BGS")
+        bgs_wave, bgs_flux, bgs_err = self._scaled_arm_arrays("BGS")
+        return {
+            "redshift": self.redshift,
+            "objid": self.objid,
+            "ra": self.ra,
+            "dec": self.dec,
+            "consistency": self.consistency,
+            "scale_bgs_to_rgs": self.arm_scale_bgs_to_rgs,
+            "scale_method": self.scale_method,
+            "scale_status": self.scale_status,
+            "rgs": {"wavelength": rgs_wave, "flux": rgs_flux, "err": rgs_err},
+            "bgs_raw": {"wavelength": bgs_wave_raw, "flux": bgs_flux_raw, "err": bgs_err_raw},
+            "bgs": {"wavelength": bgs_wave, "flux": bgs_flux, "err": bgs_err},
+            "merged": merged,
+        }
