@@ -75,6 +75,7 @@ _TEMPLATE_EMISSION_LINES = [
     ("O I", 11290.0),
     ("Pa β", 12821.6),
 ]
+_TEMPLATE_COLOR = (220, 0, 0, 230)
 
 
 class ImageCutoutWidget(QWidget):
@@ -555,12 +556,22 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
     coordinate_changed = Signal(float, float)  # Signal for coordinate updates
     
     def __init__(self, spectra, SpecClass=SpecEuclid1d, initial_counter=0,
-                 z_max=5.0, history_dict=None, euclid_fits=None):
+                 z_max=5.0, history_dict=None, euclid_fits=None,
+                 rgs_file=None, bgs_file=None, ext=None, extname=None,
+                 dual_good_pixels_only=False):
         super().__init__()
         self.SpecClass = SpecClass
         self.template_manager = TemplateManager()
         self.euclid_fits = euclid_fits
         self._euclid_overlay_cache = {}
+        self.dual_rgs_file = rgs_file
+        self.dual_bgs_file = bgs_file
+        self.dual_ext = ext
+        self.dual_extname = extname
+        self.dual_good_pixels_only = bool(dual_good_pixels_only)
+        self._dual_mode = bool(self.dual_rgs_file and self.dual_bgs_file)
+        self.spec_dual = None
+        self._legend = None
         self._observed_wmin = None
         self._observed_wmax = None
         self._annotation_wave = None
@@ -568,7 +579,21 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
 
         # ``spectra`` can either be a FITS file containing multiple extensions
         # or a list of individual spectrum files.
-        if isinstance(spectra, (list, tuple)):
+        if self._dual_mode:
+            self.speclist = None
+            self.specfile = self.dual_rgs_file
+            if self.dual_ext is not None or self.dual_extname not in (None, ""):
+                self.len_list = 1
+            else:
+                rgs_count = self._count_hdus_in_file(self.dual_rgs_file)
+                bgs_count = self._count_hdus_in_file(self.dual_bgs_file)
+                if rgs_count != bgs_count:
+                    print(
+                        f"Warning: RGS/BGS extension count mismatch ({rgs_count} vs {bgs_count}); "
+                        f"using min={min(rgs_count, bgs_count)}."
+                    )
+                self.len_list = min(rgs_count, bgs_count)
+        elif isinstance(spectra, (list, tuple)):
             self.speclist = list(spectra)
             self.specfile = None
             self.len_list = len(self.speclist)
@@ -657,6 +682,26 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self.plot_next()
 
     # Copy all existing methods from original PGSpecPlot
+    @staticmethod
+    def _count_hdus_in_file(filename):
+        try:
+            if hasattr(SpecEuclid1d, "count_in_file"):
+                return int(SpecEuclid1d.count_in_file(filename))
+        except Exception:
+            pass
+        with fits.open(filename) as hdul:
+            return max(0, len(hdul) - 1)
+
+    def _set_legend(self, enabled):
+        if self._legend is not None:
+            try:
+                self._legend.scene().removeItem(self._legend)
+            except Exception:
+                pass
+            self._legend = None
+        if enabled:
+            self._legend = self.addLegend(offset=(10, 10))
+
     def _load_spec(self, index_zero_based):
         """Load a spectrum by 0-based index from ``spectra``.
         
@@ -673,6 +718,32 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             spec = self.SpecClass(self.specfile, ext=index_zero_based + 1)
         self._ensure_spec_defaults(spec)
         return spec
+
+    def _load_dual_spec(self, index_zero_based):
+        ext = self.dual_ext if self.dual_ext is not None else index_zero_based + 1
+        extname = self.dual_extname
+        if extname in ("",):
+            extname = None
+        dual = SpecEuclid1dDual(
+            rgs_file=self.dual_rgs_file,
+            bgs_file=self.dual_bgs_file,
+            ext=ext,
+            extname=extname,
+            good_pixels_only=self.dual_good_pixels_only,
+        )
+        spec = dual.rgs if dual.rgs is not None else dual.bgs
+        if spec is None:
+            raise RuntimeError("SpecEuclid1dDual returned no arm data.")
+        self._ensure_spec_defaults(spec)
+        return spec, dual
+
+    def _load_current_spec(self, index_zero_based):
+        if self._dual_mode:
+            spec, dual = self._load_dual_spec(index_zero_based)
+            self.spec_dual = dual
+            return spec
+        self.spec_dual = None
+        return self._load_spec(index_zero_based)
 
     def _ensure_spec_defaults(self, spec):
         """Ensure common attributes exist on ``spec``."""
@@ -722,125 +793,204 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
     def plot_single(self):
         """Plot the spectrum without template."""
         spec = self.spec
+        dual = self.spec_dual
         is_sparcl = 'SpecSparcl' in globals() and isinstance(spec, SpecSparcl)
         is_euclid = getattr(spec, 'telescope', '').lower() == 'euclid'
+        is_euclid_dual = dual is not None
         self._observed_wmin = None
         self._observed_wmax = None
         self._annotation_wave = None
         self._annotation_flux = None
+        self._set_legend(is_euclid_dual)
+        annotation_wave_parts = []
+        annotation_flux_parts = []
         
         # Follow original code pattern with sigma clipping
         wave_full = spec.wave.value if hasattr(spec.wave, 'value') else spec.wave
         flux_full = spec.flux.value if hasattr(spec.flux, 'value') else spec.flux
 
-        if is_sparcl:
+        if is_euclid_dual:
+            dual_data = dual.for_redshift()
+            rgs = dual_data.get("rgs", {})
+            bgs = dual_data.get("bgs", {})
+            wave_rgs_raw = rgs.get("wavelength")
+            flux_rgs_raw = rgs.get("flux")
+            wave_bgs_raw = bgs.get("wavelength")
+            flux_bgs_raw = bgs.get("flux")
+            wave_rgs = np.asarray(wave_rgs_raw if wave_rgs_raw is not None else [], dtype=float)
+            flux_rgs = np.asarray(flux_rgs_raw if flux_rgs_raw is not None else [], dtype=float)
+            wave_bgs = np.asarray(wave_bgs_raw if wave_bgs_raw is not None else [], dtype=float)
+            flux_bgs = np.asarray(flux_bgs_raw if flux_bgs_raw is not None else [], dtype=float)
+            wave_rgs_for_xlim = wave_rgs[np.isfinite(wave_rgs)]
+            wave_bgs_for_xlim = wave_bgs[np.isfinite(wave_bgs)]
+            finite_r = np.isfinite(wave_rgs) & np.isfinite(flux_rgs)
+            finite_b = np.isfinite(wave_bgs) & np.isfinite(flux_bgs)
+            wave_rgs = wave_rgs[finite_r]
+            flux_rgs = flux_rgs[finite_r]
+            wave_bgs = wave_bgs[finite_b]
+            flux_bgs = flux_bgs[finite_b]
+
+            if wave_rgs.size > 0:
+                self.plot(
+                    wave_rgs,
+                    flux_rgs,
+                    pen=pg.mkPen((44, 160, 44, 220), width=2),
+                    name="RGS",
+                    antialias=True,
+                )
+                gm_r = getattr(dual.rgs, "good_mask", None) if dual.rgs is not None else None
+                if gm_r is not None and dual.rgs is not None and len(gm_r) == len(getattr(dual.rgs, "wave", [])):
+                    rw = np.asarray(dual.rgs.wave.value if hasattr(dual.rgs.wave, "value") else dual.rgs.wave, dtype=float)
+                    rf = np.asarray(dual.rgs.flux.value if hasattr(dual.rgs.flux, "value") else dual.rgs.flux, dtype=float)
+                    gm_r = np.asarray(gm_r, dtype=bool) & np.isfinite(rw) & np.isfinite(rf)
+                    if np.any(gm_r):
+                        self.plot(rw[gm_r], rf[gm_r], pen=pg.mkPen((44, 160, 44, 240), width=2), antialias=True)
+            if wave_bgs.size > 0:
+                self.plot(
+                    wave_bgs,
+                    flux_bgs,
+                    pen=pg.mkPen((31, 119, 180, 220), width=2),
+                    name="BGS (scaled)",
+                    antialias=True,
+                )
+                gm_b = getattr(dual.bgs, "good_mask", None) if dual.bgs is not None else None
+                if gm_b is not None and dual.bgs is not None and len(gm_b) == len(getattr(dual.bgs, "wave", [])):
+                    bw = np.asarray(dual.bgs.wave.value if hasattr(dual.bgs.wave, "value") else dual.bgs.wave, dtype=float)
+                    bf = np.asarray(dual.bgs.flux.value if hasattr(dual.bgs.flux, "value") else dual.bgs.flux, dtype=float)
+                    bs = float(getattr(dual, "arm_scale_bgs_to_rgs", 1.0))
+                    gm_b = np.asarray(gm_b, dtype=bool) & np.isfinite(bw) & np.isfinite(bf)
+                    if np.any(gm_b):
+                        self.plot(bw[gm_b], bf[gm_b] * bs, pen=pg.mkPen((31, 119, 180, 240), width=2), antialias=True)
+
+            parts_wave = []
+            parts_flux = []
+            if wave_rgs.size > 0:
+                parts_wave.append(wave_rgs)
+                parts_flux.append(flux_rgs)
+            if wave_bgs.size > 0:
+                parts_wave.append(wave_bgs)
+                parts_flux.append(flux_bgs)
+            if parts_wave:
+                all_wave = np.concatenate(parts_wave)
+                all_flux = np.concatenate(parts_flux)
+                self.wave = all_wave
+                self.flux = all_flux
+                self._annotation_wave = all_wave
+                self._annotation_flux = all_flux
+                xlim_parts = []
+                if wave_rgs_for_xlim.size > 0:
+                    xlim_parts.append(wave_rgs_for_xlim)
+                if wave_bgs_for_xlim.size > 0:
+                    xlim_parts.append(wave_bgs_for_xlim)
+                if xlim_parts:
+                    all_wave_for_xlim = np.concatenate(xlim_parts)
+                    self._observed_wmin = float(np.nanmin(all_wave_for_xlim))
+                    self._observed_wmax = float(np.nanmax(all_wave_for_xlim))
+                else:
+                    self._observed_wmin = float(np.nanmin(all_wave))
+                    self._observed_wmax = float(np.nanmax(all_wave))
+        elif is_sparcl:
             idx = (wave_full >= 3800) & (wave_full <= 9300)
             wave_full = wave_full[idx]
             flux_full = flux_full[idx]
         
-        if is_euclid:
-            finite = np.isfinite(wave_full) & np.isfinite(flux_full)
-            wave = wave_full[finite]
-            flux = flux_full[finite]
-        else:
-            # Apply sigma clipping like original code
-            flux_masked = np.ma.masked_invalid(flux_full)
-            flux_sigclip = sigma_clip(flux_masked, sigma=10, maxiters=3)
-            wave = wave_full[~flux_sigclip.mask]
-            flux = flux_sigclip.data[~flux_sigclip.mask]
-        
-        # Store cleaned data for template scaling
-        self.wave = wave
-        self.flux = flux
-        annotation_wave_parts = [np.asarray(wave)]
-        annotation_flux_parts = [np.asarray(flux)]
-        
-        if is_sparcl:
-            # Make the raw SPARCL spectrum semi-transparent to emphasize smoothing.
-            self.plot(wave, flux, pen=pg.mkPen((0, 0, 255, 80), width=1), antialias=True)
-            n = int(len(flux))
-            if n >= 7:
-                window_length = min(31, n if n % 2 == 1 else n - 1)
-                if window_length >= 7:
-                    polyorder = 3 if window_length > 3 else 2
-                    flux_sm = savgol_filter(flux, window_length=window_length, polyorder=polyorder)
-                    self.plot(wave, flux_sm, pen=pg.mkPen('k', width=3), antialias=True)
-
-            # Optional: overlay matching Euclid spectrum (extname == euclid_object_id).
-            euclid_object_id = getattr(spec, "euclid_object_id", None)
-            if self.euclid_fits is not None and euclid_object_id not in (None, "", 0):
-                euclid_spec = self._load_euclid_overlay(euclid_object_id)
-                if euclid_spec is not None:
-                    euclid_wave = euclid_spec.wave.value
-                    euclid_flux = euclid_spec.flux.value
-                    euclid_good_mask = getattr(euclid_spec, 'good_mask', None)
-                    scale = 1.0
-                    denom_flux = euclid_flux
-                    if euclid_good_mask is not None and len(euclid_good_mask) == len(euclid_flux):
-                        good = np.asarray(euclid_good_mask, dtype=bool)
-                        good = good & np.isfinite(euclid_wave) & np.isfinite(euclid_flux)
-                        if np.any(good):
-                            denom_flux = euclid_flux[good]
-                    denom = np.nanmedian(np.abs(denom_flux))
-                    numer = np.nanmedian(np.abs(flux))
-                    if np.isfinite(denom) and denom > 0 and np.isfinite(numer) and numer > 0:
-                        scale = numer / denom
-                    euclid_flux_scaled = euclid_flux * scale
-                    # Plot unmasked Euclid overlay in grey with alpha.
-                    self.plot(
-                        euclid_wave,
-                        euclid_flux_scaled,
-                        pen=pg.mkPen((95, 95, 95, 150), width=2),
-                        antialias=True,
-                    )
-                    # Overlay good Euclid pixels.
-                    if euclid_good_mask is not None and len(euclid_good_mask) == len(euclid_flux):
-                        good = np.asarray(euclid_good_mask, dtype=bool)
-                        good = good & np.isfinite(euclid_wave) & np.isfinite(euclid_flux_scaled)
-                        if np.any(good):
-                            self.plot(
-                                euclid_wave[good],
-                                euclid_flux_scaled[good],
-                                pen=pg.mkPen((0, 150, 0, 220), width=2),
-                                antialias=True,
-                            )
-                    annotation_wave_parts.append(np.asarray(euclid_wave))
-                    annotation_flux_parts.append(np.asarray(euclid_flux_scaled))
-
-                    try:
-                        self._observed_wmin = float(min(np.nanmin(wave), np.nanmin(euclid_wave)))
-                        self._observed_wmax = float(max(np.nanmax(wave), np.nanmax(euclid_wave)))
-                    except Exception:
-                        self._observed_wmin = float(np.nanmin(wave))
-                        self._observed_wmax = float(np.nanmax(wave))
-            else:
-                self._observed_wmin = float(np.nanmin(wave))
-                self._observed_wmax = float(np.nanmax(wave))
-        else:
+        if not is_euclid_dual:
             if is_euclid:
-                # Plot unmasked Euclid spectrum in grey with alpha.
-                self.plot(wave, flux, pen=pg.mkPen((95, 95, 95, 150), width=2), antialias=True)
-                # Overlay good pixels when mask info is available.
-                good_mask = getattr(spec, 'good_mask', None)
-                if good_mask is not None and len(good_mask) == len(wave_full):
-                    good_mask = np.asarray(good_mask, dtype=bool)
-                    good_mask = good_mask & np.isfinite(wave_full) & np.isfinite(flux_full)
-                    if np.any(good_mask):
-                        wave_good = wave_full[good_mask]
-                        flux_good = flux_full[good_mask]
-                        self.plot(wave_good, flux_good, pen=pg.mkPen((0, 0, 180, 220), width=2), antialias=True)
-                        self.wave = wave_good
-                        self.flux = flux_good
-                        annotation_wave_parts.append(np.asarray(wave))
-                        annotation_flux_parts.append(np.asarray(flux))
-                self._observed_wmin = float(np.nanmin(wave))
-                self._observed_wmax = float(np.nanmax(wave))
+                finite = np.isfinite(wave_full) & np.isfinite(flux_full)
+                wave = wave_full[finite]
+                flux = flux_full[finite]
             else:
-                # Plot as dots connected by lines like original
-                self.plot(wave, flux, pen='b', symbol='o', symbolSize=4, 
-                         symbolPen=None, connect='finite', symbolBrush='k', antialias=True)
-                self._observed_wmin = float(np.nanmin(wave))
-                self._observed_wmax = float(np.nanmax(wave))
+                flux_masked = np.ma.masked_invalid(flux_full)
+                flux_sigclip = sigma_clip(flux_masked, sigma=10, maxiters=3)
+                wave = wave_full[~flux_sigclip.mask]
+                flux = flux_sigclip.data[~flux_sigclip.mask]
+            self.wave = wave
+            self.flux = flux
+            annotation_wave_parts = [np.asarray(wave)]
+            annotation_flux_parts = [np.asarray(flux)]
+
+            if is_sparcl:
+                self.plot(wave, flux, pen=pg.mkPen((0, 0, 255, 80), width=1), antialias=True)
+                n = int(len(flux))
+                if n >= 7:
+                    window_length = min(31, n if n % 2 == 1 else n - 1)
+                    if window_length >= 7:
+                        polyorder = 3 if window_length > 3 else 2
+                        flux_sm = savgol_filter(flux, window_length=window_length, polyorder=polyorder)
+                        self.plot(wave, flux_sm, pen=pg.mkPen('k', width=3), antialias=True)
+
+                euclid_object_id = getattr(spec, "euclid_object_id", None)
+                dr_text = str(getattr(spec, "data_release", "") or "")
+                is_desi_overlay = "desi" in dr_text.lower()
+                overlay_good_pen = pg.mkPen((128, 0, 128, 220), width=2) if is_desi_overlay else pg.mkPen((0, 150, 0, 220), width=2)
+                if self.euclid_fits is not None and euclid_object_id not in (None, "", 0):
+                    euclid_spec = self._load_euclid_overlay(euclid_object_id)
+                    if euclid_spec is not None:
+                        euclid_wave = euclid_spec.wave.value
+                        euclid_flux = euclid_spec.flux.value
+                        euclid_good_mask = getattr(euclid_spec, 'good_mask', None)
+                        scale = 1.0
+                        denom_flux = euclid_flux
+                        if euclid_good_mask is not None and len(euclid_good_mask) == len(euclid_flux):
+                            good = np.asarray(euclid_good_mask, dtype=bool)
+                            good = good & np.isfinite(euclid_wave) & np.isfinite(euclid_flux)
+                            if np.any(good):
+                                denom_flux = euclid_flux[good]
+                        denom = np.nanmedian(np.abs(denom_flux))
+                        numer = np.nanmedian(np.abs(flux))
+                        if np.isfinite(denom) and denom > 0 and np.isfinite(numer) and numer > 0:
+                            scale = numer / denom
+                        euclid_flux_scaled = euclid_flux * scale
+                        self.plot(
+                            euclid_wave,
+                            euclid_flux_scaled,
+                            pen=pg.mkPen((95, 95, 95, 150), width=2),
+                            antialias=True,
+                        )
+                        if euclid_good_mask is not None and len(euclid_good_mask) == len(euclid_flux):
+                            good = np.asarray(euclid_good_mask, dtype=bool)
+                            good = good & np.isfinite(euclid_wave) & np.isfinite(euclid_flux_scaled)
+                            if np.any(good):
+                                self.plot(
+                                    euclid_wave[good],
+                                    euclid_flux_scaled[good],
+                                    pen=overlay_good_pen,
+                                    antialias=True,
+                                )
+                        annotation_wave_parts.append(np.asarray(euclid_wave))
+                        annotation_flux_parts.append(np.asarray(euclid_flux_scaled))
+
+                        try:
+                            self._observed_wmin = float(min(np.nanmin(wave), np.nanmin(euclid_wave)))
+                            self._observed_wmax = float(max(np.nanmax(wave), np.nanmax(euclid_wave)))
+                        except Exception:
+                            self._observed_wmin = float(np.nanmin(wave))
+                            self._observed_wmax = float(np.nanmax(wave))
+                else:
+                    self._observed_wmin = float(np.nanmin(wave))
+                    self._observed_wmax = float(np.nanmax(wave))
+            else:
+                if is_euclid:
+                    self.plot(wave, flux, pen=pg.mkPen((95, 95, 95, 150), width=2), antialias=True)
+                    good_mask = getattr(spec, 'good_mask', None)
+                    if good_mask is not None and len(good_mask) == len(wave_full):
+                        good_mask = np.asarray(good_mask, dtype=bool)
+                        good_mask = good_mask & np.isfinite(wave_full) & np.isfinite(flux_full)
+                        if np.any(good_mask):
+                            wave_good = wave_full[good_mask]
+                            flux_good = flux_full[good_mask]
+                            self.plot(wave_good, flux_good, pen=pg.mkPen((0, 0, 180, 220), width=2), antialias=True)
+                            self.wave = wave_good
+                            self.flux = flux_good
+                            annotation_wave_parts.append(np.asarray(wave))
+                            annotation_flux_parts.append(np.asarray(flux))
+                    self._observed_wmin = float(np.nanmin(wave))
+                    self._observed_wmax = float(np.nanmax(wave))
+                else:
+                    self.plot(wave, flux, pen='b', symbol='o', symbolSize=4,
+                             symbolPen=None, connect='finite', symbolBrush='k', antialias=True)
+                    self._observed_wmin = float(np.nanmin(wave))
+                    self._observed_wmax = float(np.nanmax(wave))
 
         if annotation_wave_parts and annotation_flux_parts:
             self._annotation_wave = np.concatenate(annotation_wave_parts)
@@ -880,8 +1030,9 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             flux_temp = flux_temp[idx]
 
             if wave_temp.size > 0 and np.isfinite(np.mean(flux_temp)) and np.mean(flux_temp) != 0:
-                flux_temp_scaled = flux_temp / np.mean(flux_temp) * np.abs(flux.mean()) * 1.5
-                self.plot(wave_temp, flux_temp_scaled, pen=pg.mkPen('r', width=2), antialias=True)
+                ref_flux = self.flux if hasattr(self, "flux") and self.flux is not None and len(self.flux) > 0 else flux_temp
+                flux_temp_scaled = flux_temp / np.mean(flux_temp) * np.abs(np.nanmean(ref_flux)) * 1.5
+                self.plot(wave_temp, flux_temp_scaled, pen=pg.mkPen(_TEMPLATE_COLOR, width=2), antialias=True)
                 self._label_template_emission_lines(
                     wmin=wmin,
                     wmax=wmax,
@@ -962,6 +1113,21 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         z_gaia_str = _fmt_z("z_gaia", z_gaia, hide_zero=True)
         if z_gaia_str is not None:
             parts.append(z_gaia_str)
+        if self.spec_dual is not None:
+            dual = self.spec_dual
+            scale = float(getattr(dual, "arm_scale_bgs_to_rgs", 1.0))
+            status = str(getattr(dual, "scale_status", "unknown"))
+            owmin = getattr(dual, "overlap_wmin", np.nan)
+            owmax = getattr(dual, "overlap_wmax", np.nan)
+            n_bgs = int(getattr(dual, "overlap_n_bgs", 0))
+            n_rgs = int(getattr(dual, "overlap_n_rgs", 0))
+            if np.isfinite(owmin) and np.isfinite(owmax) and owmax > owmin:
+                parts.append(
+                    f"BGS→RGS scale={scale:.4g} ({status}), "
+                    f"overlap={owmin:.1f}-{owmax:.1f} Å, nB={n_bgs}, nR={n_rgs}"
+                )
+            else:
+                parts.append(f"BGS→RGS scale={scale:.4g} ({status}), overlap=none")
 
         text_content = "  ".join(parts)
         
@@ -1010,7 +1176,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             flux_scaled = flux_template / np.mean(flux_template) * np.abs(np.nanmean(spec_flux)) * 1.5
         
         # Plot template clipped to the observed wavelength range.
-        self.plot(wave_shifted, flux_scaled, pen=pg.mkPen('r', width=2), antialias=True)
+        self.plot(wave_shifted, flux_scaled, pen=pg.mkPen(_TEMPLATE_COLOR, width=2), antialias=True)
         if self._observed_wmin is not None and self._observed_wmax is not None:
             self._label_template_emission_lines(wmin=self._observed_wmin, wmax=self._observed_wmax, z=z)
         elif hasattr(self, 'wave') and self.wave is not None and len(self.wave) > 0:
@@ -1097,18 +1263,19 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         if self.counter >= self.len_list:
             print("No more spectra to plot.")
             return
-        
         self.clear()
-        
-        # Load spectrum using original logic
-        if self.speclist is not None:
-            filename = self.speclist[self.counter]
-            spec = self.SpecClass(filename)
+        while self.counter < self.len_list:
+            try:
+                spec = self._load_current_spec(self.counter)
+                self.spec = spec
+                break
+            except Exception as e:
+                shown_idx = self.counter + 1
+                print(f"Failed to load spectrum {shown_idx}: {e}")
+                self.counter += 1
         else:
-            spec = self.SpecClass(self.specfile, ext=self.counter + 1)
-            
-        self.spec = spec
-        self._ensure_spec_defaults(spec)
+            print("No more spectra to plot.")
+            return
         
         if spec.objid in self.history:
             spec.z_vi = self.history[spec.objid][4]
@@ -1133,16 +1300,20 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         """Plot previous spectrum."""
         if self.counter > 1:
             self.clear()
-            
-            # Load spectrum using original logic
-            if self.speclist is not None:
-                filename = self.speclist[self.counter - 2]
-                spec = self.SpecClass(filename)
-            else:
-                spec = self.SpecClass(self.specfile, ext=self.counter - 1)
-                
-            self.spec = spec
-            self._ensure_spec_defaults(spec)
+            loaded = False
+            target = self.counter - 2
+            while target >= 0:
+                try:
+                    spec = self._load_current_spec(target)
+                    self.spec = spec
+                    loaded = True
+                    break
+                except Exception as e:
+                    print(f"Failed to load spectrum {target + 1}: {e}")
+                    target -= 1
+            if not loaded:
+                print("No previous spectrum to plot.")
+                return
             
             if spec.objid in self.history:
                 spec.z_vi = self.history[spec.objid][4]
@@ -1151,7 +1322,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                 class_vi = self.history[spec.objid][3]
                 print(f"\tVisual class from history: {class_vi}.")
                 
-            self.counter -= 1
+            self.counter = target + 1
             self.update_slider_and_spin()
             
             # Set the display number before plotting (counter is correct after decrement)
@@ -1178,14 +1349,12 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
 
         self.clear()
         target_zero_based = index_one_based - 1
-        if self.speclist is not None:
-            filename = self.speclist[target_zero_based]
-            spec = self.SpecClass(filename)
-        else:
-            spec = self.SpecClass(self.specfile, ext=target_zero_based + 1)
-
+        try:
+            spec = self._load_current_spec(target_zero_based)
+        except Exception as e:
+            print(f"Failed to load spectrum {index_one_based}: {e}")
+            return
         self.spec = spec
-        self._ensure_spec_defaults(spec)
 
         if spec.objid in self.history:
             spec.z_vi = self.history[spec.objid][4]
@@ -1324,13 +1493,12 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             if event.key() == Qt.Key_R:
                 self.clear()
                 # Reload current spectrum using original logic
-                if self.speclist is not None:
-                    filename = self.speclist[self.counter - 1]
-                    spec = self.SpecClass(filename)
-                else:
-                    spec = self.SpecClass(self.specfile, ext=self.counter)
+                try:
+                    spec = self._load_current_spec(self.counter - 1)
+                except Exception as e:
+                    print(f"Failed to reload spectrum {self.counter}: {e}")
+                    return
                 self.spec = spec
-                self._ensure_spec_defaults(spec)
                 # For reload, display number is current counter
                 self._displaying_spectrum_number = self.counter
                 self.update_slider_and_spin()
@@ -1399,13 +1567,21 @@ class PGSpecPlotAppEnhanced(QApplication):
 
     def __init__(self, spectra, SpecClass=SpecEuclid1d,
                  output_file='vi_output.csv', z_max=5.0, load_history=False,
-                 euclid_fits=None, cutout_buffer_dir=None, enable_background_prefetch=True):
+                 euclid_fits=None, cutout_buffer_dir=None, enable_background_prefetch=True,
+                 rgs_file=None, bgs_file=None, ext=None, extname=None,
+                 dual_good_pixels_only=False):
         super().__init__(sys.argv)
         self.output_file = output_file
         self.spectra = spectra
         self.SpecClass = SpecClass
         self.euclid_fits = euclid_fits
         self.enable_background_prefetch = enable_background_prefetch
+        self.rgs_file = rgs_file
+        self.bgs_file = bgs_file
+        self.dual_ext = ext
+        self.dual_extname = extname
+        self.dual_good_pixels_only = bool(dual_good_pixels_only)
+        self._dual_mode = bool(self.rgs_file and self.bgs_file)
 
         if load_history and os.path.exists(self.output_file):
             print(f"Loading history from {self.output_file} ...")
@@ -1445,12 +1621,19 @@ class PGSpecPlotAppEnhanced(QApplication):
             initial_counter=initial_counter,
             z_max=z_max,
             history_dict=history_dict,
-            euclid_fits=self.euclid_fits)
+            euclid_fits=self.euclid_fits,
+            rgs_file=self.rgs_file,
+            bgs_file=self.bgs_file,
+            ext=self.dual_ext,
+            extname=self.dual_extname,
+            dual_good_pixels_only=self.dual_good_pixels_only)
         self.len_list = self.plot.len_list
         
         # Create buffer directory for cutouts
         if cutout_buffer_dir is not None:
             buffer_dir = Path(cutout_buffer_dir)
+        elif self._dual_mode:
+            buffer_dir = Path(self.rgs_file).parent / "cutout_buffer"
         elif isinstance(spectra, str):  # Single FITS file
             buffer_dir = Path(spectra).parent / "cutout_buffer"
         else:  # List of files
@@ -1540,7 +1723,18 @@ class PGSpecPlotAppEnhanced(QApplication):
                 # Get ALL remaining spectra data
                 for i in range(current_index, self.len_list):
                     try:
-                        if self.plot.speclist is not None:
+                        if self._dual_mode:
+                            dual = SpecEuclid1dDual(
+                                rgs_file=self.rgs_file,
+                                bgs_file=self.bgs_file,
+                                ext=self.dual_ext if self.dual_ext is not None else i + 1,
+                                extname=self.dual_extname,
+                                good_pixels_only=self.dual_good_pixels_only,
+                            )
+                            spec = dual.rgs if dual.rgs is not None else dual.bgs
+                            if spec is None:
+                                continue
+                        elif self.plot.speclist is not None:
                             # Load from individual files
                             filename = self.plot.speclist[i]
                             spec = self.SpecClass(filename)
@@ -1613,6 +1807,8 @@ class PGSpecPlotAppEnhanced(QApplication):
             self.goto_index_spin.setMaximum(self.len_list)
             self.goto_index_spin.setValue(1)
             self.goto_index_spin.setMaximumHeight(35)
+            # Avoid stealing keyboard navigation shortcuts on startup.
+            self.goto_index_spin.setFocusPolicy(Qt.ClickFocus)
             toolbar_layout.addWidget(self.goto_index_spin)
 
             self.goto_index_btn = QPushButton("Go")
@@ -1694,6 +1890,9 @@ class PGSpecPlotAppEnhanced(QApplication):
             
             self.main_splitter = main_splitter  # Store reference for toggle
             self._update_go_to_controls()
+            # Keep keyboard shortcuts active by default.
+            self.plot.setFocusPolicy(Qt.StrongFocus)
+            self.plot.setFocus()
             
         self.layout = layout
         self.layout.show()
@@ -1703,6 +1902,7 @@ class PGSpecPlotAppEnhanced(QApplication):
         self.plot.keyPressEvent(event)
         self.sync_qa_checkbox_from_current_spec()
         self._update_go_to_controls()
+        self.plot.setFocus()
 
     def _current_index_one_based(self):
         if hasattr(self.plot, "_displaying_spectrum_number"):
@@ -1729,6 +1929,7 @@ class PGSpecPlotAppEnhanced(QApplication):
         self.plot.jump_to_spectrum(index_one_based)
         self.sync_qa_checkbox_from_current_spec()
         self._update_go_to_controls()
+        self.plot.setFocus()
 
     def mousePressEvent(self, event):
         """Forward mouse events to plot widget."""
@@ -1876,11 +2077,19 @@ class PGSpecPlotThreadEnhanced(QThread):
 
     def __init__(self, spectra=None, SpecClass=SpecEuclid1d, specfile=None, **kwargs):
         super().__init__()
+        self.rgs_file = kwargs.get("rgs_file", None)
+        self.bgs_file = kwargs.get("bgs_file", None)
+        self.dual_ext = kwargs.get("ext", None)
+        self.dual_extname = kwargs.get("extname", None)
+        self.dual_good_pixels_only = bool(kwargs.get("dual_good_pixels_only", False))
+        self._dual_mode = bool(self.rgs_file and self.bgs_file)
         # Handle backward compatibility: if specfile is provided but spectra is not
         if spectra is None and specfile is not None:
             self.spectra = specfile
         elif spectra is not None:
             self.spectra = spectra
+        elif self._dual_mode:
+            self.spectra = self.rgs_file
         else:
             raise ValueError("Either 'spectra' or 'specfile' must be provided")
             
@@ -1912,6 +2121,16 @@ class PGSpecPlotThreadEnhanced(QThread):
         return Path(spectra[0]).parent / "cutout_buffer"
 
     @staticmethod
+    def _count_hdus_in_file(filename):
+        try:
+            if hasattr(SpecEuclid1d, "count_in_file"):
+                return int(SpecEuclid1d.count_in_file(filename))
+        except Exception:
+            pass
+        with fits.open(filename) as hdul:
+            return max(0, len(hdul) - 1)
+
+    @staticmethod
     def _should_offer_predownload(buffer_dir):
         """Offer predownload only when cutout buffer does not exist yet."""
         return buffer_dir is not None and not Path(buffer_dir).exists()
@@ -1936,6 +2155,37 @@ class PGSpecPlotThreadEnhanced(QThread):
     def _collect_cutout_records(self):
         """Collect objid/ra/dec records for all spectra."""
         records = []
+        if self._dual_mode:
+            if self.dual_ext is not None or self.dual_extname not in (None, ""):
+                ext_values = [self.dual_ext if self.dual_ext is not None else None]
+            else:
+                try:
+                    total = self._count_hdus_in_file(self.rgs_file)
+                except Exception as exc:
+                    print(f"Failed to determine dual spectrum count for predownload: {exc}")
+                    return records
+                ext_values = list(range(1, total + 1))
+
+            for ext in ext_values:
+                try:
+                    dual = SpecEuclid1dDual(
+                        rgs_file=self.rgs_file,
+                        bgs_file=self.bgs_file,
+                        ext=ext,
+                        extname=self.dual_extname,
+                        good_pixels_only=self.dual_good_pixels_only,
+                    )
+                    spec = dual.rgs if dual.rgs is not None else dual.bgs
+                    if spec is None:
+                        continue
+                    objid = getattr(spec, "objid", None)
+                    ra = getattr(spec, "ra", None)
+                    dec = getattr(spec, "dec", None)
+                    records.append({"objid": objid, "ra": ra, "dec": dec})
+                except Exception as exc:
+                    print(f"Failed to load dual spectrum ext={ext} for predownload: {exc}")
+            return records
+
         if isinstance(self.spectra, (list, tuple, np.ndarray)):
             input_list = list(self.spectra)
             for filename in input_list:

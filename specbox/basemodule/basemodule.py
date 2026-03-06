@@ -1416,6 +1416,10 @@ class SpecEuclid1dDual:
         self,
         rgs: Optional[SpecEuclid1d] = None,
         bgs: Optional[SpecEuclid1d] = None,
+        rgs_file: Optional[str] = None,
+        bgs_file: Optional[str] = None,
+        ext: Optional[int] = None,
+        extname: Optional[str] = None,
         rgs_filename: Optional[str] = None,
         bgs_filename: Optional[str] = None,
         rgs_ext: Optional[int] = None,
@@ -1444,6 +1448,22 @@ class SpecEuclid1dDual:
             "ra_match": None,
             "dec_match": None,
         }
+
+        # Backward-compatible input normalization:
+        # - `rgs_file`/`bgs_file` are short aliases for filenames.
+        # - `ext`/`extname` are shared selectors for both arms.
+        if rgs_filename is None:
+            rgs_filename = rgs_file
+        if bgs_filename is None:
+            bgs_filename = bgs_file
+        if rgs_ext is None:
+            rgs_ext = ext
+        if bgs_ext is None:
+            bgs_ext = ext
+        if rgs_extname is None:
+            rgs_extname = extname
+        if bgs_extname is None:
+            bgs_extname = extname
 
         if self.rgs is None and rgs_filename is not None:
             self.rgs = SpecEuclid1d(
