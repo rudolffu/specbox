@@ -47,6 +47,7 @@ from ..auxmodule.cutout_download import (
 # locate the data files in the package
 data_path = Path(files("specbox").joinpath("data/templates"))
 fits_file = data_path / "qso1" / "optical_nir_qso_template_v1.fits"
+type2_template_file = data_path / "qso2" / "Lusso_2024_compo_SED19.txt"
 tb_temp = Table.read(str(fits_file))
 tb_temp.rename_columns(['wavelength', 'flux'], ['Wave', 'Flux'])
 try:
@@ -529,9 +530,24 @@ class TemplateManager:
             'flux': tb_temp['Flux'].data,
             'description': 'Type 1 AGN/QSO Template'
         }
-        
-        # Placeholder for Type 2 template
-        self.templates["Type 2"] = None  # Will be loaded if available
+
+        # Load Type 2 template from packaged text file when available.
+        self.templates["Type 2"] = None
+        try:
+            if type2_template_file.exists():
+                type2_data = np.loadtxt(str(type2_template_file))
+                if type2_data.ndim == 2 and type2_data.shape[1] >= 2:
+                    self.templates["Type 2"] = {
+                        'wave': type2_data[:, 0],
+                        'flux': type2_data[:, 1],
+                        'description': 'Type 2 AGN/QSO Template (Lusso et al. 2024)'
+                    }
+                else:
+                    print(f"Type 2 template has unexpected format: {type2_template_file}")
+            else:
+                print(f"Type 2 template file not found: {type2_template_file}")
+        except Exception as e:
+            print(f"Failed to load Type 2 template from {type2_template_file}: {e}")
     
     def get_template(self, template_name):
         """Get template by name."""
