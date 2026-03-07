@@ -594,6 +594,70 @@ class SpecSparcl(SpecPandasRow):
             self.objid = getattr(self, "sparcl_id", getattr(self, "specid", getattr(self, "_row", 0)))
 
 
+class SpecEuclidCoaddRow(SpecPandasRow):
+    """Reader for Euclid BGS+RGS coadd spectra stored in dataframe files.
+
+    Expected row schema:
+    - arrays: ``wavelength``, ``flux``, ``err`` (optional: ``mask``, ``arm``)
+    - scalars: ``objid``, ``ra``, ``dec``, and merge diagnostics.
+    """
+
+    def __init__(
+        self,
+        filename: Optional[Union[str, Path]] = None,
+        *args,
+        df: Optional[pd.DataFrame] = None,
+        ext: int = 1,
+        row: Optional[int] = None,
+        file_format: Optional[str] = None,
+        pandas_read_kwargs: Optional[Mapping[str, Any]] = None,
+        wave_unit: Optional[u.Unit] = u.Angstrom,
+        flux_unit: Optional[u.Unit] = u.erg / u.s / u.cm**2 / u.Angstrom,
+        **kwargs,
+    ):
+        super().__init__(
+            filename=filename,
+            df=df,
+            ext=ext,
+            row=row,
+            file_format=file_format,
+            pandas_read_kwargs=pandas_read_kwargs,
+            wave_col="wavelength",
+            flux_col="flux",
+            err_col="err",
+            ivar_col=None,
+            wave_unit=wave_unit,
+            flux_unit=flux_unit,
+            meta_cols=(
+                "objid",
+                "ra",
+                "dec",
+                "scale_bgs_to_rgs",
+                "scale_status",
+                "overlap_wmin",
+                "overlap_wmax",
+                "overlap_n_bgs",
+                "overlap_n_rgs",
+                "status",
+                "ext",
+                "extname",
+            ),
+            array_cols={"mask": "mask", "arm": "arm"},
+            *args,
+            **kwargs,
+        )
+        if not hasattr(self, "objname"):
+            if hasattr(self, "ra") and hasattr(self, "dec"):
+                try:
+                    self.objname = designation(self.ra, self.dec)
+                except Exception:
+                    self.objname = "Unknown"
+            else:
+                self.objname = "Unknown"
+        if not hasattr(self, "objid"):
+            self.objid = getattr(self, "_row", 0)
+
+
 class SpecSDSS(SpecIOMixin, ConvenientSpecMixin):
     """
     Class for SDSS spectra.
@@ -1230,6 +1294,8 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
     def _clip_bounds_from_lrange(lrange, n_bins):
         """Return clipping bounds (start, stop) for known Euclid arms."""
         label = str(lrange).strip().upper() if lrange is not None else ""
+        if label == "COADD":
+            return 0, int(n_bins)
         if label == "BGS":
             return 62, 411
         if label == "RGS":
@@ -1318,40 +1384,76 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.mask = None
         self.bad_mask = None
         self.good_mask = None
+        colnames = set(data.dtype.names or [])
+        has_signal_schema = {"WAVELENGTH", "SIGNAL", "VAR"}.issubset(colnames)
+        has_coadd_schema = {"WAVELENGTH", "FLUX", "ERR"}.issubset(colnames)
+        if not has_signal_schema and not has_coadd_schema:
+            raise ValueError(
+                f"Unsupported Euclid table schema in {filename} ext={ext if ext is not None else extname}. "
+                "Expected either (WAVELENGTH,SIGNAL,VAR) or (WAVELENGTH,FLUX,ERR)."
+            )
+
         fscale = hdu.header.get('FSCALE', 1.0)
         wave_scale, wave_unit, _ = self._parse_scaled_unit(self._get_column_unit(hdu, 'WAVELENGTH'), u.Angstrom)
-        flux_scale_tunit, flux_unit, flux_has_embedded_scale = self._parse_scaled_unit(
-            self._get_column_unit(hdu, 'SIGNAL'),
-            u.erg / u.s / u.cm**2 / u.Angstrom,
-        )
-        var_scale_tunit, var_unit, var_has_embedded_scale = self._parse_scaled_unit(
-            self._get_column_unit(hdu, 'VAR'),
-            flux_unit**2,
-        )
-        if flux_has_embedded_scale:
-            flux_scale_effective = flux_scale_tunit
-        else:
-            flux_scale_effective = flux_scale_tunit * fscale
 
-        if var_has_embedded_scale:
-            var_scale_effective = var_scale_tunit
-        else:
-            var_scale_effective = var_scale_tunit * (fscale ** 2)
+        if has_signal_schema:
+            flux_col = 'SIGNAL'
+            var_col = 'VAR'
+            flux = data[flux_col]
+            variance = data[var_col]
+            flux_scale_tunit, flux_unit, flux_has_embedded_scale = self._parse_scaled_unit(
+                self._get_column_unit(hdu, flux_col),
+                u.erg / u.s / u.cm**2 / u.Angstrom,
+            )
+            var_scale_tunit, var_unit, var_has_embedded_scale = self._parse_scaled_unit(
+                self._get_column_unit(hdu, var_col),
+                flux_unit**2,
+            )
+            if flux_has_embedded_scale:
+                flux_scale_effective = flux_scale_tunit
+            else:
+                flux_scale_effective = flux_scale_tunit * fscale
+            if var_has_embedded_scale:
+                var_scale_effective = var_scale_tunit
+            else:
+                var_scale_effective = var_scale_tunit * (fscale ** 2)
 
-        if flux_has_embedded_scale and (fscale is not None):
-            try:
-                fscale_float = float(fscale)
-            except Exception:
-                fscale_float = 1.0
-            if (not np.isclose(abs(fscale_float), 1.0)) and (not np.isclose(fscale_float, flux_scale_tunit)):
-                warnings.warn(
-                    f"Euclid spectrum has both FSCALE={fscale_float} and SIGNAL TUNIT scale={flux_scale_tunit}; "
-                    "using TUNIT scale for flux/variance.",
-                    UserWarning,
-                )
+            if flux_has_embedded_scale and (fscale is not None):
+                try:
+                    fscale_float = float(fscale)
+                except Exception:
+                    fscale_float = 1.0
+                if (not np.isclose(abs(fscale_float), 1.0)) and (not np.isclose(fscale_float, flux_scale_tunit)):
+                    warnings.warn(
+                        f"Euclid spectrum has both FSCALE={fscale_float} and SIGNAL TUNIT scale={flux_scale_tunit}; "
+                        "using TUNIT scale for flux/variance.",
+                        UserWarning,
+                    )
+            err = np.sqrt(variance * var_scale_effective) * (var_unit ** 0.5)
+        else:
+            flux_col = 'FLUX'
+            err_col = 'ERR'
+            flux = data[flux_col]
+            err_native = data[err_col]
+            flux_scale_tunit, flux_unit, flux_has_embedded_scale = self._parse_scaled_unit(
+                self._get_column_unit(hdu, flux_col),
+                u.erg / u.s / u.cm**2 / u.Angstrom,
+            )
+            err_scale_tunit, err_unit, err_has_embedded_scale = self._parse_scaled_unit(
+                self._get_column_unit(hdu, err_col),
+                flux_unit,
+            )
+            if flux_has_embedded_scale:
+                flux_scale_effective = flux_scale_tunit
+            else:
+                flux_scale_effective = flux_scale_tunit * fscale
+            if err_has_embedded_scale:
+                err_scale_effective = err_scale_tunit
+            else:
+                err_scale_effective = err_scale_tunit * fscale
+            err = err_native * err_scale_effective * err_unit
+
         wave = data['WAVELENGTH']
-        flux = data['SIGNAL']
-        variance = data['VAR']
         if data.dtype.names is not None and 'MASK' in data.dtype.names:
             self.mask = np.asarray(data['MASK'])
             self.bad_mask = (self.mask % 2 == 1) | (self.mask >= 64)
@@ -1359,7 +1461,7 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             if good_pixels_only:
                 wave = wave[self.good_mask]
                 flux = flux[self.good_mask]
-                variance = variance[self.good_mask]
+                err = err[self.good_mask]
                 self.mask = self.mask[self.good_mask]
                 self.data = data[self.good_mask]
         elif good_pixels_only:
@@ -1371,7 +1473,7 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.flux_unit = flux_unit
         self.wave = wave * wave_scale * wave_unit
         self.flux = flux * flux_scale_effective * flux_unit
-        self.err = np.sqrt(variance * var_scale_effective) * (var_unit ** 0.5)
+        self.err = err
         self.spec = Spectrum(spectral_axis=self.wave, 
                                flux=self.flux, 
                                uncertainty=StdDevUncertainty(self.err))
@@ -1508,6 +1610,30 @@ class SpecEuclid1dDual:
                 return gm
         return None
 
+    def _arm_mask_array(self, arm: str):
+        spec = self.rgs if arm.upper() == "RGS" else self.bgs
+        wave, _, _ = self._arm_arrays(arm)
+        if spec is None or wave is None:
+            return None
+        mask = getattr(spec, "mask", None)
+        if mask is None:
+            return np.zeros(len(wave), dtype=np.int64)
+        mask = np.asarray(mask)
+        if len(mask) != len(wave):
+            return np.zeros(len(wave), dtype=np.int64)
+        return mask.astype(np.int64, copy=False)
+
+    @staticmethod
+    def _is_invalid_pixel(flux, mask):
+        flux_arr = np.asarray(flux, dtype=float)
+        mask_arr = np.asarray(mask, dtype=np.int64)
+        return (
+            (~np.isfinite(flux_arr))
+            | (flux_arr == 0.0)
+            | ((mask_arr & 1) != 0)
+            | ((mask_arr & 64) != 0)
+        )
+
     def _update_consistency_metadata(self):
         rgs = self.rgs
         bgs = self.bgs
@@ -1586,6 +1712,112 @@ class SpecEuclid1dDual:
             return wave, flux * self.arm_scale_bgs_to_rgs, err * self.arm_scale_bgs_to_rgs
         return wave, flux, err
 
+    @staticmethod
+    def _estimate_grid_step(grid):
+        grid = np.asarray(grid, dtype=float)
+        if grid.size < 2:
+            return np.nan
+        diffs = np.diff(grid)
+        diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+        if diffs.size == 0:
+            return np.nan
+        return float(np.nanmedian(diffs))
+
+    def _build_extended_rgs_grid(self):
+        """Extend the RGS grid to span full BGS+RGS range using RGS step size."""
+        wr, _, _ = self._arm_arrays("RGS")
+        wb, _, _ = self._scaled_arm_arrays("BGS")
+        if wr is None and wb is None:
+            return np.array([], dtype=float)
+        if wr is None:
+            return np.asarray(wb, dtype=float)
+
+        wr = np.asarray(wr, dtype=float)
+        if wb is None:
+            return wr.copy()
+        wb = np.asarray(wb, dtype=float)
+
+        step = self._estimate_grid_step(wr)
+        if (not np.isfinite(step)) or (step <= 0):
+            return wr.copy()
+
+        wr_min = float(np.nanmin(wr))
+        wr_max = float(np.nanmax(wr))
+        wb_min = float(np.nanmin(wb))
+        wb_max = float(np.nanmax(wb))
+
+        if wb_min < wr_min:
+            n_pre = int(np.ceil((wr_min - wb_min) / step))
+            pre = wr_min - step * np.arange(n_pre, 0, -1, dtype=float)
+        else:
+            pre = np.array([], dtype=float)
+
+        if wb_max > wr_max:
+            n_post = int(np.ceil((wb_max - wr_max) / step))
+            post = wr_max + step * np.arange(1, n_post + 1, dtype=float)
+        else:
+            post = np.array([], dtype=float)
+
+        return np.concatenate([pre, wr, post])
+
+    def _resample_bgs_to_grid(self, target_wave):
+        """Resample scaled BGS arrays and mask onto a target wavelength grid."""
+        target_wave = np.asarray(target_wave, dtype=float)
+        wb, fb, eb = self._scaled_arm_arrays("BGS")
+        if target_wave.size == 0 or wb is None:
+            return None, None, None, None, None
+
+        wb = np.asarray(wb, dtype=float)
+        fb = np.asarray(fb, dtype=float)
+        eb = np.asarray(eb, dtype=float)
+        mb = self._arm_mask_array("BGS")
+        if mb is None:
+            mb = np.zeros(len(wb), dtype=np.int64)
+        else:
+            mb = np.asarray(mb, dtype=np.int64)
+
+        finite_src = np.isfinite(wb) & np.isfinite(fb) & np.isfinite(eb)
+        if np.sum(finite_src) < 2:
+            return target_wave, np.full_like(target_wave, np.nan), np.full_like(target_wave, np.nan), np.zeros_like(target_wave, dtype=np.int64), np.zeros_like(target_wave, dtype=bool)
+
+        wb_src = wb[finite_src]
+        fb_src = fb[finite_src]
+        eb_src = eb[finite_src]
+
+        in_bounds = (target_wave >= np.nanmin(wb_src)) & (target_wave <= np.nanmax(wb_src))
+        fb_i = np.full_like(target_wave, np.nan, dtype=float)
+        eb_i = np.full_like(target_wave, np.nan, dtype=float)
+        if np.any(in_bounds):
+            resampler = FluxConservingResampler(extrapolation_treatment="nan_fill")
+            target_axis = target_wave * u.AA
+
+            flux_spec = Spectrum(
+                spectral_axis=wb_src * u.AA,
+                flux=fb_src * u.dimensionless_unscaled,
+            )
+            fb_res = resampler(flux_spec, target_axis).flux.value
+            fb_i[in_bounds] = fb_res[in_bounds]
+
+            var_src = np.square(eb_src)
+            var_spec = Spectrum(
+                spectral_axis=wb_src * u.AA,
+                flux=var_src * u.dimensionless_unscaled,
+            )
+            var_res = resampler(var_spec, target_axis).flux.value
+            var_res = np.where(var_res >= 0, var_res, np.nan)
+            eb_i[in_bounds] = np.sqrt(var_res[in_bounds])
+
+        bgs_idx = np.searchsorted(wb_src, target_wave)
+        bgs_idx = np.clip(bgs_idx, 1, max(len(wb_src) - 1, 1))
+        left = bgs_idx - 1
+        right = bgs_idx
+        choose_right = np.abs(target_wave - wb_src[right]) < np.abs(target_wave - wb_src[left])
+        nearest = np.where(choose_right, right, left)
+        mb_src = mb[finite_src]
+        mb_i = mb_src[nearest].astype(np.int64, copy=False)
+        mb_i[~in_bounds] = 0
+        return target_wave, fb_i, eb_i, mb_i, in_bounds
+
     def plot_together(self, ax=None, stacked: bool = False, labels: bool = True):
         """
         Plot RGS and BGS together.
@@ -1645,23 +1877,56 @@ class SpecEuclid1dDual:
             )
         return ax_rgs
 
-    def merge(self):
-        """
-        Build a merged wavelength grid from available arms.
-
-        Returns
-        -------
-        dict
-            Keys: ``wavelength``, ``flux``, ``err``, ``arm``.
-            ``arm`` labels each merged sample as ``RGS`` or ``BGS``.
-        """
-        wb, fb, eb = self._scaled_arm_arrays("BGS")
+    def _merge_on_rgs_grid(self):
+        """Merge arms on extended RGS grid, resampling only BGS."""
         wr, fr, er = self._arm_arrays("RGS")
-        if wb is None and wr is None:
+        if wr is None:
+            wb, fb, eb = self._scaled_arm_arrays("BGS")
+            mb = self._arm_mask_array("BGS")
+            if wb is None:
+                return {
+                    "wavelength": np.array([]),
+                    "flux": np.array([]),
+                    "err": np.array([]),
+                    "mask": np.array([], dtype=np.int64),
+                    "arm": np.array([]),
+                    "scale_bgs_to_rgs": self.arm_scale_bgs_to_rgs,
+                    "overlap_wmin": self.overlap_wmin,
+                    "overlap_wmax": self.overlap_wmax,
+                    "overlap_n_bgs": self.overlap_n_bgs,
+                    "overlap_n_rgs": self.overlap_n_rgs,
+                }
+            if mb is None:
+                mb = np.zeros(len(wb), dtype=np.int64)
+            return {
+                "wavelength": wb.copy(),
+                "flux": fb.copy(),
+                "err": eb.copy(),
+                "mask": np.asarray(mb, dtype=np.int64),
+                "arm": np.array(["BGS"] * len(wb), dtype="U12"),
+                "scale_bgs_to_rgs": self.arm_scale_bgs_to_rgs,
+                "overlap_wmin": self.overlap_wmin,
+                "overlap_wmax": self.overlap_wmax,
+                "overlap_n_bgs": self.overlap_n_bgs,
+                "overlap_n_rgs": self.overlap_n_rgs,
+            }
+
+        wr = np.asarray(wr, dtype=float)
+        fr = np.asarray(fr, dtype=float)
+        er = np.asarray(er, dtype=float)
+        mr = self._arm_mask_array("RGS")
+        if mr is None:
+            mr = np.zeros(len(wr), dtype=np.int64)
+        else:
+            mr = np.asarray(mr, dtype=np.int64)
+
+        wave_grid = self._build_extended_rgs_grid()
+        if wave_grid.size == 0:
             return {
                 "wavelength": np.array([]),
                 "flux": np.array([]),
                 "err": np.array([]),
+                "mask": np.array([], dtype=np.int64),
                 "arm": np.array([]),
                 "scale_bgs_to_rgs": self.arm_scale_bgs_to_rgs,
                 "overlap_wmin": self.overlap_wmin,
@@ -1669,44 +1934,34 @@ class SpecEuclid1dDual:
                 "overlap_n_bgs": self.overlap_n_bgs,
                 "overlap_n_rgs": self.overlap_n_rgs,
             }
-        if wb is None:
-            return {
-                "wavelength": wr.copy(),
-                "flux": fr.copy(),
-                "err": er.copy(),
-                "arm": np.array(["RGS"] * len(wr), dtype="U6"),
-                "scale_bgs_to_rgs": self.arm_scale_bgs_to_rgs,
-                "overlap_wmin": self.overlap_wmin,
-                "overlap_wmax": self.overlap_wmax,
-                "overlap_n_bgs": self.overlap_n_bgs,
-                "overlap_n_rgs": self.overlap_n_rgs,
-            }
-        if wr is None:
-            return {
-                "wavelength": wb.copy(),
-                "flux": fb.copy(),
-                "err": eb.copy(),
-                "arm": np.array(["BGS"] * len(wb), dtype="U6"),
-                "scale_bgs_to_rgs": self.arm_scale_bgs_to_rgs,
-                "overlap_wmin": self.overlap_wmin,
-                "overlap_wmax": self.overlap_wmax,
-                "overlap_n_bgs": self.overlap_n_bgs,
-                "overlap_n_rgs": self.overlap_n_rgs,
-            }
 
-        owmin = max(np.nanmin(wb), np.nanmin(wr))
-        owmax = min(np.nanmax(wb), np.nanmax(wr))
-        if not np.isfinite(owmin) or not np.isfinite(owmax) or owmax <= owmin:
-            wave = np.concatenate([wb, wr])
-            flux = np.concatenate([fb, fr])
-            err = np.concatenate([eb, er])
-            arm = np.array(["BGS"] * len(wb) + ["RGS"] * len(wr), dtype="U6")
-            idx = np.argsort(wave)
+        # Embed RGS values onto extended grid without resampling RGS bins.
+        fr_grid = np.full(len(wave_grid), np.nan, dtype=float)
+        er_grid = np.full(len(wave_grid), np.nan, dtype=float)
+        mr_grid = np.zeros(len(wave_grid), dtype=np.int64)
+        r_present = np.zeros(len(wave_grid), dtype=bool)
+        r_idx = np.searchsorted(wave_grid, wr)
+        r_valid = (r_idx >= 0) & (r_idx < len(wave_grid))
+        if np.any(r_valid):
+            tmp = np.zeros_like(r_valid, dtype=bool)
+            rv_idx = r_idx[r_valid]
+            tmp[r_valid] = np.isclose(wave_grid[rv_idx], wr[r_valid], rtol=0, atol=1e-6)
+            r_valid = tmp
+        if np.any(r_valid):
+            rr = r_idx[r_valid]
+            fr_grid[rr] = fr[r_valid]
+            er_grid[rr] = er[r_valid]
+            mr_grid[rr] = mr[r_valid]
+            r_present[rr] = True
+
+        _, fb_i, eb_i, mb_i, b_in_bounds = self._resample_bgs_to_grid(wave_grid)
+        if fb_i is None:
             return {
-                "wavelength": wave[idx],
-                "flux": flux[idx],
-                "err": err[idx],
-                "arm": arm[idx],
+                "wavelength": wave_grid.copy(),
+                "flux": fr_grid.copy(),
+                "err": er_grid.copy(),
+                "mask": mr_grid.copy(),
+                "arm": np.array(["RGS"] * len(wave_grid), dtype="U12"),
                 "scale_bgs_to_rgs": self.arm_scale_bgs_to_rgs,
                 "overlap_wmin": self.overlap_wmin,
                 "overlap_wmax": self.overlap_wmax,
@@ -1714,54 +1969,90 @@ class SpecEuclid1dDual:
                 "overlap_n_rgs": self.overlap_n_rgs,
             }
 
-        b_only = wb < owmin
-        r_only = wr > owmax
-        r_overlap = (wr >= owmin) & (wr <= owmax)
+        b_present = np.asarray(b_in_bounds, dtype=bool)
+        both_present = r_present & b_present
+        r_only = r_present & (~b_present)
+        b_only = (~r_present) & b_present
 
-        wr_o = wr[r_overlap]
-        fr_o = fr[r_overlap]
-        er_o = er[r_overlap]
-        fb_i = np.interp(wr_o, wb, fb, left=np.nan, right=np.nan)
-        eb_i = np.interp(wr_o, wb, eb, left=np.nan, right=np.nan)
+        invalid_r = r_present & self._is_invalid_pixel(fr_grid, mr_grid)
+        invalid_b = b_present & self._is_invalid_pixel(fb_i, mb_i)
+        both_valid = both_present & (~invalid_r) & (~invalid_b)
+        r_valid_only = both_present & (~invalid_r) & invalid_b
+        b_valid_only = both_present & invalid_r & (~invalid_b)
+        both_invalid = both_present & invalid_r & invalid_b
 
-        w_r = np.where(np.isfinite(er_o) & (er_o > 0), 1.0 / (er_o ** 2), 0.0)
+        w_r = np.where(np.isfinite(er_grid) & (er_grid > 0), 1.0 / (er_grid ** 2), 0.0)
         w_b = np.where(np.isfinite(eb_i) & (eb_i > 0), 1.0 / (eb_i ** 2), 0.0)
         w_sum = w_r + w_b
 
-        f_merge = np.full_like(wr_o, np.nan, dtype=float)
-        e_merge = np.full_like(wr_o, np.nan, dtype=float)
-        good = w_sum > 0
-        if np.any(good):
-            f_merge[good] = (fr_o[good] * w_r[good] + fb_i[good] * w_b[good]) / w_sum[good]
-            e_merge[good] = np.sqrt(1.0 / w_sum[good])
+        flux_out = np.full(len(wave_grid), np.nan, dtype=float)
+        err_out = np.full(len(wave_grid), np.nan, dtype=float)
+        mask_out = np.zeros(len(wave_grid), dtype=np.int64)
+        arm_out = np.full(len(wave_grid), "MERGED", dtype="U12")
 
-        use_r_only = (w_r > 0) & (w_b == 0)
-        use_b_only = (w_b > 0) & (w_r == 0)
-        f_merge[use_r_only] = fr_o[use_r_only]
-        e_merge[use_r_only] = er_o[use_r_only]
-        f_merge[use_b_only] = fb_i[use_b_only]
-        e_merge[use_b_only] = eb_i[use_b_only]
+        # Non-overlap bins: keep original arm data and quality flags unchanged.
+        flux_out[r_only] = fr_grid[r_only]
+        err_out[r_only] = er_grid[r_only]
+        mask_out[r_only] = mr_grid[r_only]
+        arm_out[r_only] = "RGS"
 
-        wave = np.concatenate([wb[b_only], wr_o, wr[r_only]])
-        flux = np.concatenate([fb[b_only], f_merge, fr[r_only]])
-        err = np.concatenate([eb[b_only], e_merge, er[r_only]])
-        arm = np.concatenate([
-            np.array(["BGS"] * int(np.sum(b_only)), dtype="U6"),
-            np.array(["MERGED"] * len(wr_o), dtype="U6"),
-            np.array(["RGS"] * int(np.sum(r_only)), dtype="U6"),
-        ])
-        idx = np.argsort(wave)
+        flux_out[b_only] = fb_i[b_only]
+        err_out[b_only] = eb_i[b_only]
+        mask_out[b_only] = mb_i[b_only]
+        arm_out[b_only] = "BGS"
+
+        flux_out[r_valid_only] = fr_grid[r_valid_only]
+        err_out[r_valid_only] = er_grid[r_valid_only]
+        mask_out[r_valid_only] = mr_grid[r_valid_only]
+        arm_out[r_valid_only] = "RGS"
+
+        flux_out[b_valid_only] = fb_i[b_valid_only]
+        err_out[b_valid_only] = eb_i[b_valid_only]
+        mask_out[b_valid_only] = mb_i[b_valid_only]
+        arm_out[b_valid_only] = "BGS"
+
+        weighted = both_valid | both_invalid
+        weighted_good = weighted & (w_sum > 0)
+        if np.any(weighted_good):
+            flux_out[weighted_good] = (
+                fr_grid[weighted_good] * w_r[weighted_good] + fb_i[weighted_good] * w_b[weighted_good]
+            ) / w_sum[weighted_good]
+            err_out[weighted_good] = np.sqrt(1.0 / w_sum[weighted_good])
+            mask_out[weighted_good] = np.bitwise_or(mr_grid[weighted_good], mb_i[weighted_good])
+
+        weighted_bad = weighted & (w_sum <= 0)
+        if np.any(weighted_bad):
+            flux_out[weighted_bad] = np.nan
+            err_out[weighted_bad] = np.nan
+            mask_out[weighted_bad] = np.bitwise_or(mr_grid[weighted_bad], mb_i[weighted_bad])
+
+        # Explicit invalid flag for both-invalid bins.
+        if np.any(both_invalid):
+            mask_out[both_invalid] = np.bitwise_or(mask_out[both_invalid], 1)
+
         return {
-            "wavelength": wave[idx],
-            "flux": flux[idx],
-            "err": err[idx],
-            "arm": arm[idx],
+            "wavelength": wave_grid.copy(),
+            "flux": flux_out,
+            "err": err_out,
+            "mask": mask_out,
+            "arm": arm_out,
             "scale_bgs_to_rgs": self.arm_scale_bgs_to_rgs,
             "overlap_wmin": self.overlap_wmin,
             "overlap_wmax": self.overlap_wmax,
             "overlap_n_bgs": self.overlap_n_bgs,
             "overlap_n_rgs": self.overlap_n_rgs,
         }
+
+    def merge(self):
+        """
+        Build merged spectrum on RGS wavelength bins.
+
+        Returns
+        -------
+        dict
+            Keys: ``wavelength``, ``flux``, ``err``, ``mask``, ``arm``.
+        """
+        return self._merge_on_rgs_grid()
 
     def for_redshift(self):
         """

@@ -1080,6 +1080,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         objname = getattr(spec, 'objname', 'Unknown')
         objid = getattr(spec, 'objid', 'Unknown')
         class_vi = None
+        dual_diag = None
         if objid in self.history and len(self.history[objid]) > 3:
             class_vi = self.history[objid][3]
         if class_vi in (None, ""):
@@ -1138,14 +1139,16 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             n_bgs = int(getattr(dual, "overlap_n_bgs", 0))
             n_rgs = int(getattr(dual, "overlap_n_rgs", 0))
             if np.isfinite(owmin) and np.isfinite(owmax) and owmax > owmin:
-                parts.append(
+                dual_diag = (
                     f"BGS→RGS scale={scale:.4g} ({status}), "
                     f"overlap={owmin:.1f}-{owmax:.1f} Å, nB={n_bgs}, nR={n_rgs}"
                 )
             else:
-                parts.append(f"BGS→RGS scale={scale:.4g} ({status}), overlap=none")
+                dual_diag = f"BGS→RGS scale={scale:.4g} ({status}), overlap=none"
 
         text_content = "  ".join(parts)
+        if dual_diag:
+            text_content = f"{text_content}\n{dual_diag}"
         
         if hasattr(self, 'spectrum_info_label'):
             self.spectrum_info_label.setText(text_content)
