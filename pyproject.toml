@@ -35,6 +35,11 @@ dependencies = [
   "astroquery",
 ]
 
+[project.scripts]
+specbox-viewer = "specbox.cli:viewer_cli"
+specbox-pcf = "specbox.cli:pcf_cli"
+specbox-coadd = "specbox.cli:coadd_cli"
+
 [tool.setuptools]
 include-package-data = true
 

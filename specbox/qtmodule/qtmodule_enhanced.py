@@ -2096,6 +2096,7 @@ class PGSpecPlotThreadEnhanced(QThread):
 
     def __init__(self, spectra=None, SpecClass=SpecEuclid1d, specfile=None, **kwargs):
         super().__init__()
+        explicit_buffer_dir = kwargs.pop("cutout_buffer_dir", None)
         self.rgs_file = kwargs.get("rgs_file", None)
         self.bgs_file = kwargs.get("bgs_file", None)
         self.dual_ext = kwargs.get("ext", None)
@@ -2116,7 +2117,7 @@ class PGSpecPlotThreadEnhanced(QThread):
         self.app = None
         self._skip_window = False
         self._disable_background_prefetch = False
-        self.buffer_dir = self._resolve_buffer_dir(self.spectra)
+        self.buffer_dir = Path(explicit_buffer_dir) if explicit_buffer_dir else self._resolve_buffer_dir(self.spectra)
 
         if self._should_offer_predownload(self.buffer_dir):
             if self._prompt_for_bulk_download():

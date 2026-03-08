@@ -33,11 +33,17 @@ def _parse_extname_list(extnames: Optional[str]) -> List[str]:
     return values
 
 
+def _open_extnames(path: str) -> List[str]:
+    with fits.open(path) as hdul:
+        return [str(h.name).strip() for h in hdul[1:] if str(h.name).strip()]
+
+
 def _iter_targets(
     rgs_file: str,
     bgs_file: str,
     ext: Optional[int],
     extnames: Optional[str],
+    pair_by: str = "extname_intersection",
 ) -> Iterable[Tuple[Optional[int], Optional[str]]]:
     extname_values = _parse_extname_list(extnames)
     if extname_values:
@@ -47,6 +53,14 @@ def _iter_targets(
 
     if ext is not None:
         yield int(ext), None
+        return
+
+    if pair_by == "extname_intersection":
+        rgs_ext = set(_open_extnames(rgs_file))
+        bgs_ext = set(_open_extnames(bgs_file))
+        shared = sorted(rgs_ext.intersection(bgs_ext))
+        for extname in shared:
+            yield None, extname
         return
 
     n = min(_count_hdus(rgs_file), _count_hdus(bgs_file))
@@ -114,6 +128,7 @@ def build_coadds(
     extnames: Optional[str] = None,
     include_arms: bool = False,
     parquet_chunk_size: int = 2000,
+    pair_by: str = "extname_intersection",
 ):
     prefix = Path(output_prefix)
     prefix.parent.mkdir(parents=True, exist_ok=True)
@@ -121,7 +136,9 @@ def build_coadds(
     success_rows: List[Dict] = []
     log_rows: List[Dict] = []
 
-    for idx, (ext_value, extname_value) in enumerate(_iter_targets(rgs_file, bgs_file, ext, extnames), start=1):
+    for idx, (ext_value, extname_value) in enumerate(
+        _iter_targets(rgs_file, bgs_file, ext, extnames, pair_by=pair_by), start=1
+    ):
         status = "ok"
         message = ""
         try:
@@ -212,6 +229,12 @@ def main():
     parser.add_argument("--output-prefix", required=True, help="Output prefix (no extension)")
     parser.add_argument("--ext", type=int, default=None, help="Single extension index (1-based)")
     parser.add_argument("--extnames", default=None, help="Comma-separated extnames to process")
+    parser.add_argument(
+        "--pair-by",
+        choices=["extname_intersection", "ext_index"],
+        default="extname_intersection",
+        help="Pairing mode when --ext/--extnames are not provided.",
+    )
     parser.add_argument("--include-arms", action="store_true", help="Include per-arm arrays in parquet")
     parser.add_argument("--parquet-chunk-size", type=int, default=2000, help="Rows per parquet chunk")
     args = parser.parse_args()
@@ -224,6 +247,7 @@ def main():
         extnames=args.extnames,
         include_arms=args.include_arms,
         parquet_chunk_size=args.parquet_chunk_size,
+        pair_by=args.pair_by,
     )
 
 
