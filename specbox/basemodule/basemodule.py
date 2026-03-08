@@ -1747,14 +1747,14 @@ class SpecEuclid1dDual:
         wb_max = float(np.nanmax(wb))
 
         if wb_min < wr_min:
-            n_pre = int(np.ceil((wr_min - wb_min) / step))
-            pre = wr_min - step * np.arange(n_pre, 0, -1, dtype=float)
+            n_pre = int(np.floor((wr_min - wb_min) / step))
+            pre = wr_min - step * np.arange(n_pre, 0, -1, dtype=float) if n_pre > 0 else np.array([], dtype=float)
         else:
             pre = np.array([], dtype=float)
 
         if wb_max > wr_max:
-            n_post = int(np.ceil((wb_max - wr_max) / step))
-            post = wr_max + step * np.arange(1, n_post + 1, dtype=float)
+            n_post = int(np.floor((wb_max - wr_max) / step))
+            post = wr_max + step * np.arange(1, n_post + 1, dtype=float) if n_post > 0 else np.array([], dtype=float)
         else:
             post = np.array([], dtype=float)
 
