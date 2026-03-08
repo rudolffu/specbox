@@ -66,3 +66,38 @@ viewer = PGSpecPlotThreadEnhanced(
 )
 viewer.run()
 ```
+
+## CLI quick start
+
+### Viewer
+
+```bash
+specbox-viewer --spectra COMBINED_SPECS.fits --spec-class euclid
+```
+
+Notes:
+- If `--output-file` is omitted, viewer writes to `vi_{input_file_name}_results.csv`.
+- History is auto-loaded when that CSV already exists.
+
+### Euclid coadd (BGS+RGS)
+
+```bash
+specbox-coadd \
+  --rgs-file sz_ragn_dr1_rgs_chunk_001.fits \
+  --bgs-file sz_ragn_dr1_bgs_chunk_001.fits \
+  --output-prefix coadd/sz_ragn_dr1_coadd_chunk_001 \
+  --pair-by extname_intersection
+```
+
+### PCF redshift
+
+```bash
+# Default: Type 1 template only
+specbox-pcf --fits coadd/sz_ragn_dr1_coadd_chunk_001.fits
+
+# Type 1 + Type 2 (ragn_na; internally constrained to 0 < z < 3)
+specbox-pcf --fits coadd/sz_ragn_dr1_coadd_chunk_001.fits --enable-type2
+
+# ragn_dr1 only (as type1)
+specbox-pcf --fits coadd/sz_ragn_dr1_coadd_chunk_001.fits --ragn-dr1-only
+```

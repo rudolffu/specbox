@@ -82,6 +82,38 @@ Notes:
 - If `good_pixels_only=True`, only `good_mask` pixels are used to initialize `wave/flux/err/spec`.
 - If `z_vi` is available in the header, `redshift` is set from `z_vi`.
 
+## `SpecEuclid1dDual`
+
+Paired Euclid reader for BGS+RGS spectra.
+
+```python
+from specbox.basemodule import SpecEuclid1dDual
+
+sp = SpecEuclid1dDual(
+    rgs_file="sz_ragn_dr1_rgs_chunk_001.fits",
+    bgs_file="sz_ragn_dr1_bgs_chunk_001.fits",
+    extname="101272183",
+)
+payload = sp.for_redshift()
+merged = payload["merged"]
+```
+
+Notes:
+- Uses arm-aware clipping (`RGS`/`BGS`) by default.
+- Computes and stores BGS→RGS overlap scaling diagnostics.
+- Provides merged arrays (`wavelength`, `flux`, `err`, `mask`, `arm`) for coadd/PCF workflows.
+
+## `SpecEuclidCoaddRow`
+
+Reader for coadded Euclid spectra stored in dataframe/parquet rows.
+
+```python
+from specbox.basemodule import SpecEuclidCoaddRow
+
+sp = SpecEuclidCoaddRow("sz_ragn_dr1_coadd_chunk_001_part001.parquet", ext=1)
+sp.plot()
+```
+
 ## `SpecPandasRow`
 
 Generic reader for “table-of-spectra” datasets readable by pandas where each row contains

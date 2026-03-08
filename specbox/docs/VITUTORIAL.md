@@ -104,7 +104,7 @@ python -m pip install .
 
 - **Project Structure:**  
   The visual inspection tool is part of the package `specbox` which contains:
-  - `qtmodule/qtsir1d.py` – Main GUI code.
+  - `qtmodule/qtmodule_enhanced.py` – Main GUI code.
   - `basemodule.py` – Contains classes (such as `SpecEuclid1d`) to read the FITS spectra.
 
 ---
@@ -173,39 +173,24 @@ Notes:
 
 ### Running the Visual Inspection Tool
 
-You can run the tool by creating an instance of the inspection thread. For example, create a Python script (`my_vi_script.py`) with the following code:
-
-```python
-#!/usr/bin/env python
-from specbox.qtmodule.qtsir1d import PGSpecPlotThread
-
-a = PGSpecPlotThread(
-    specfile='COMBINED_SPECS.fits', # example path to the FITS file containing the spectra
-    output_file='vi_results.csv', # path to the output CSV file
-    z_max=5.0,
-    load_history=True
-)
-a.run()
-```
-
-Run the script in a terminal (ensure that the correct environment is activated):
+Use the CLI:
 
 ```bash
-python my_vi_script.py
+specbox-viewer --spectra COMBINED_SPECS.fits --spec-class euclid
 ```
 
 The first time you run the tool in a new Python environment, `matplotlib` will take some time to build the font cache. Subsequent runs will be faster.
 
 ### Parameter Explanation
 
-- **specfile:**  
+- **spectra:**  
   The path to the FITS file containing the spectra.
 - **output_file:**  
-  The CSV file where inspection results (object classification and redshift) are saved.
+  The CSV file where inspection results (object classification and redshift) are saved. If omitted, viewer uses `vi_{input_file_name}_results.csv`.
 - **z_max:**
   The maximum redshift to be considered for the slider. The default is 5.0.
 - **load_history:**  
-  If set to `True` and the CSV exists, the tool loads previous classifications and skips those spectra.
+  Optional CLI flag to force history loading. By default, history is auto-loaded when the output CSV exists.
 
 ---
 
@@ -248,6 +233,9 @@ When the tool is active, use the following keys:
 - **A:**  
   Classifies the spectrum as **QSO (AGN)**.
 
+- **N:**  
+  Classifies the spectrum as **QSO (narrow)**.
+
 - **U:**  
   Classifies the spectrum as **UNKNOWN**.
 
@@ -288,7 +276,7 @@ When the tool is active, use the following keys:
   The tool saves classifications to the specified CSV file (with columns for object ID, object name, RA, DEC, assigned class, and visually inspected redshift `z_vi`) periodically and when exiting.
 
 - **Loading History:**  
-  When `load_history=True` is provided, the tool reads the CSV file and loads the object IDs into a dictionary. It then skips any spectrum whose ID already exists in the history, allowing you to resume from where you left off.
+  The tool reads the output CSV when it exists and loads object IDs into a dictionary. It then skips spectra that already exist in history, so you can resume where you left off.
 
 ---
 
