@@ -155,7 +155,18 @@ def pcf_cli() -> None:
     parser.add_argument("--write-backend", choices=["fitsio", "astropy"], default="fitsio", help="FITS header write backend.")
     parser.add_argument("--z-key", default="Z_TEMP", help="Header key for best PCF redshift.")
     parser.add_argument("--template-type1", default=None, help="Override Type 1 template path.")
+    parser.add_argument("--template-ragn-dr1", default=None, help="Override ragn_dr1 template path.")
+    parser.add_argument(
+        "--ragn-dr1-only",
+        action="store_true",
+        help="Use ragn_dr1 as the only active template (mapped to type1).",
+    )
     parser.add_argument("--template-type2", default=None, help="Override Type 2 template path.")
+    parser.add_argument(
+        "--enable-ragn-dr1",
+        action="store_true",
+        help="Enable ragn_dr1 template in PCF.",
+    )
     parser.add_argument(
         "--enable-type2",
         action="store_true",
@@ -170,11 +181,22 @@ def pcf_cli() -> None:
 
     fits_path = Path(args.fits)
     default_templates = default_template_paths()
-    templates = {"type1": default_templates["type1"]}
-    if args.template_type1:
-        templates["type1"] = Path(args.template_type1)
+    if args.ragn_dr1_only:
+        templates = {
+            "type1": Path(args.template_ragn_dr1) if args.template_ragn_dr1 else default_templates["ragn_dr1"]
+        }
+    else:
+        templates = {"type1": default_templates["type1"]}
+        if args.template_type1:
+            templates["type1"] = Path(args.template_type1)
 
-    use_type2 = args.enable_type2 or args.template_type2 is not None
+        use_ragn_dr1 = args.enable_ragn_dr1 or args.template_ragn_dr1 is not None
+        if use_ragn_dr1:
+            templates["ragn_dr1"] = (
+                Path(args.template_ragn_dr1) if args.template_ragn_dr1 else default_templates["ragn_dr1"]
+            )
+
+    use_type2 = (not args.ragn_dr1_only) and (args.enable_type2 or args.template_type2 is not None)
     if use_type2:
         templates["type2"] = (
             Path(args.template_type2) if args.template_type2 else default_templates["type2"]

@@ -1451,6 +1451,11 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
                 err_scale_effective = err_scale_tunit
             else:
                 err_scale_effective = err_scale_tunit * fscale
+            if str(self.lrange).strip().upper() == "COADD":
+                if flux_has_embedded_scale:
+                    flux_scale_effective = 1.0
+                if err_has_embedded_scale:
+                    err_scale_effective = 1.0
             err = err_native * err_scale_effective * err_unit
 
         wave = data['WAVELENGTH']

@@ -26,8 +26,13 @@ def default_template_paths() -> Dict[str, Path]:
     root = Path(files("specbox").joinpath("data/templates"))
     return {
         "type1": root / "qso1" / "optical_nir_qso_template_v1.fits",
-        "type2": root / "qso2" / "Lusso_2024_compo_SED19.txt",
+        "ragn_dr1": root / "qso1" / "ragn_dr1.fits",
+        "type2": root / "qso2" / "ragn_na.fits",
     }
+
+
+def default_template_z_bounds() -> Dict[str, Tuple[float, float]]:
+    return {"type2": (0.0, 3.0)}
 
 
 @dataclass
@@ -322,6 +327,7 @@ def run_pcf_single(
     template_wave: ArrayLike,
     template_flux: ArrayLike,
     config: Optional[PCFConfig] = None,
+    z_bounds: Optional[Tuple[float, float]] = None,
 ) -> Dict[str, Union[np.ndarray, float, int]]:
     cfg = config or PCFConfig()
     wave = np.asarray(wave, dtype=np.float64)
@@ -347,6 +353,11 @@ def run_pcf_single(
     else:
         tpl_norm, tpl_valid = _precompute_template_matrix(template_wave, template_flux, wave, z_grid)
         corr, n_valid = _compute_corr_vector(obs_norm, obs_valid, tpl_norm, tpl_valid, cfg.min_overlap)
+        if z_bounds is not None:
+            z_lo, z_hi = z_bounds
+            in_range = (z_grid > float(z_lo)) & (z_grid < float(z_hi))
+            corr[~in_range] = -np.inf
+            n_valid[~in_range] = 0
         stats = _extract_stats(corr, n_valid, z_grid)
 
     return {
@@ -428,8 +439,10 @@ def run_pcf_dual_templates(
     valid_mask: Optional[ArrayLike],
     template_map: Optional[Mapping[str, TemplateInput]] = None,
     config: Optional[PCFConfig] = None,
+    template_z_bounds: Optional[Mapping[str, Tuple[float, float]]] = None,
 ) -> Dict[str, Union[Dict, float, str]]:
     resolved = _resolve_template_map(template_map)
+    bounds_map = default_template_z_bounds() if template_z_bounds is None else dict(template_z_bounds)
     per_template: Dict[str, Dict[str, Union[np.ndarray, float, int]]] = {}
 
     for name, (tw, tf) in resolved.items():
@@ -440,6 +453,7 @@ def run_pcf_dual_templates(
             template_wave=tw,
             template_flux=tf,
             config=config,
+            z_bounds=bounds_map.get(name),
         )
 
     selection = select_best_template(per_template)
@@ -455,6 +469,7 @@ def run_pcf_dual_templates_batch(
     valid_mask_batch: Optional[np.ndarray] = None,
     template_map: Optional[Mapping[str, TemplateInput]] = None,
     config: Optional[PCFConfig] = None,
+    template_z_bounds: Optional[Mapping[str, Tuple[float, float]]] = None,
 ) -> Dict[str, Union[Dict[str, Dict[str, np.ndarray]], np.ndarray]]:
     """Batch-level vectorized PCF for multiple spectra on a common wavelength grid."""
     cfg = config or PCFConfig()
@@ -468,6 +483,7 @@ def run_pcf_dual_templates_batch(
     obs_norm, obs_valid, frac_nan = _normalize_observed_batch(flux_batch, valid_mask_batch)
     z_grid = build_scaled_z_grid(cfg.z_min, cfg.z_max, cfg.base_z_step)
     resolved = _resolve_template_map(template_map)
+    bounds_map = default_template_z_bounds() if template_z_bounds is None else dict(template_z_bounds)
 
     per_template = {}
     for name, (tw, tf) in resolved.items():
@@ -484,6 +500,12 @@ def run_pcf_dual_templates_batch(
             tpl_valid=tpl_valid,
             min_overlap=cfg.min_overlap,
         )
+        z_bounds = bounds_map.get(name)
+        if z_bounds is not None:
+            z_lo, z_hi = z_bounds
+            in_range = (z_grid > float(z_lo)) & (z_grid < float(z_hi))
+            corr[:, ~in_range] = -np.inf
+            n_valid[:, ~in_range] = 0
         bad = frac_nan > cfg.nan_threshold
         if np.any(bad):
             corr[bad, :] = -np.inf

@@ -77,8 +77,8 @@ def _to_table_hdu(row: Dict, index: int) -> fits.BinTableHDU:
 
     columns = [
         fits.Column(name="WAVELENGTH", format="D", unit="Angstrom", array=wave),
-        fits.Column(name="FLUX", format="D", unit="10**-16 erg/s/cm2/Angstrom", array=flux),
-        fits.Column(name="ERR", format="D", unit="10**-16 erg/s/cm2/Angstrom", array=err),
+        fits.Column(name="FLUX", format="D", unit="erg/s/cm2/Angstrom", array=flux),
+        fits.Column(name="ERR", format="D", unit="erg/s/cm2/Angstrom", array=err),
         fits.Column(name="MASK", format="K", unit="Number", array=mask),
         fits.Column(name="ARM", format="12A", array=arm),
     ]

@@ -47,7 +47,8 @@ from ..auxmodule.cutout_download import (
 # locate the data files in the package
 data_path = Path(files("specbox").joinpath("data/templates"))
 fits_file = data_path / "qso1" / "optical_nir_qso_template_v1.fits"
-type2_template_file = data_path / "qso2" / "Lusso_2024_compo_SED19.txt"
+ragn_dr1_template_file = data_path / "qso1" / "ragn_dr1.fits"
+type2_template_file = data_path / "qso2" / "ragn_na.fits"
 tb_temp = Table.read(str(fits_file))
 tb_temp.rename_columns(['wavelength', 'flux'], ['Wave', 'Flux'])
 try:
@@ -531,16 +532,40 @@ class TemplateManager:
             'description': 'Type 1 AGN/QSO Template'
         }
 
-        # Load Type 2 template from packaged text file when available.
+        # Load ragn_dr1 template from packaged FITS file when available.
+        self.templates["ragn_dr1"] = None
+        try:
+            if ragn_dr1_template_file.exists():
+                ragn_tb = Table.read(str(ragn_dr1_template_file))
+                ragn_cols = {str(c).lower(): c for c in ragn_tb.colnames}
+                wave_col = ragn_cols.get("wavelength", ragn_tb.colnames[0] if len(ragn_tb.colnames) > 0 else None)
+                flux_col = ragn_cols.get("flux", ragn_tb.colnames[1] if len(ragn_tb.colnames) > 1 else None)
+                if wave_col is not None and flux_col is not None:
+                    self.templates["ragn_dr1"] = {
+                        'wave': np.asarray(ragn_tb[wave_col], dtype=float),
+                        'flux': np.asarray(ragn_tb[flux_col], dtype=float),
+                        'description': 'ragn_dr1 AGN/QSO Template'
+                    }
+                else:
+                    print(f"ragn_dr1 template has unexpected columns: {ragn_dr1_template_file}")
+            else:
+                print(f"ragn_dr1 template file not found: {ragn_dr1_template_file}")
+        except Exception as e:
+            print(f"Failed to load ragn_dr1 template from {ragn_dr1_template_file}: {e}")
+
+        # Load Type 2 template from packaged FITS file when available.
         self.templates["Type 2"] = None
         try:
             if type2_template_file.exists():
-                type2_data = np.loadtxt(str(type2_template_file))
-                if type2_data.ndim == 2 and type2_data.shape[1] >= 2:
+                type2_tb = Table.read(str(type2_template_file))
+                type2_cols = {str(c).lower(): c for c in type2_tb.colnames}
+                wave_col = type2_cols.get("wavelength", type2_tb.colnames[0] if len(type2_tb.colnames) > 0 else None)
+                flux_col = type2_cols.get("flux", type2_tb.colnames[1] if len(type2_tb.colnames) > 1 else None)
+                if wave_col is not None and flux_col is not None:
                     self.templates["Type 2"] = {
-                        'wave': type2_data[:, 0],
-                        'flux': type2_data[:, 1],
-                        'description': 'Type 2 AGN/QSO Template (Lusso et al. 2024)'
+                        'wave': np.asarray(type2_tb[wave_col], dtype=float),
+                        'flux': np.asarray(type2_tb[flux_col], dtype=float),
+                        'description': 'Type 2 AGN/QSO Template (ragn_na)'
                     }
                 else:
                     print(f"Type 2 template has unexpected format: {type2_template_file}")
@@ -1485,6 +1510,10 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             print("\tClass: QSO(AGN).")
             self.history[spec.objid] = _history_payload('QSO', spec.z_vi)
             self.update_spectrum_info_label()
+        elif event.key() == Qt.Key_N:
+            print("\tClass: QSO(narrow).")
+            self.history[spec.objid] = _history_payload('QSO(narrow)', spec.z_vi)
+            self.update_spectrum_info_label()
         elif event.key() == Qt.Key_U:
             print("\tClass: UNKNOWN.")
             self.history[spec.objid] = _history_payload('UNKNOWN', 0.0)
@@ -1862,7 +1891,7 @@ class PGSpecPlotAppEnhanced(QApplication):
             # Instructions with comprehensive keyboard shortcuts
             instruction_text = (
                 "Navigation: 'Q' next spectrum, Left/Right arrows previous/next | "
-                "Classification: 'A' QSO(AGN), 'S' STAR, 'G' GALAXY, 'U' UNKNOWN, 'L' LIKELY | "
+                "Classification: 'A' QSO(AGN), 'N' QSO(narrow), 'S' STAR, 'G' GALAXY, 'U' UNKNOWN, 'L' LIKELY | "
                 "Tools: 'Space' wavelength info, 'M' mouse position, 'R' reset zoom | "
                 "Advanced: Ctrl+R reload, Ctrl+Left first, Ctrl+Right last, Ctrl+B resume from history"
             )
