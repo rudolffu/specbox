@@ -1089,8 +1089,20 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         # Keep x-limits fixed to the clipped observed wavelength span.
         if self._observed_wmin is not None and self._observed_wmax is not None:
             self.setXRange(float(self._observed_wmin), float(self._observed_wmax), padding=0.0)
-        # Keep y dynamic.
-        self.enableAutoRange(axis='y', enable=True)
+        # Only override y-range for spectra that are entirely zero-valued.
+        flux_arr = self._annotation_flux if self._annotation_flux is not None else getattr(self, 'flux', None)
+        fixed_zero_ylim = None
+        if flux_arr is not None:
+            flux_arr = np.asarray(flux_arr, dtype=float)
+            finite_flux = flux_arr[np.isfinite(flux_arr)]
+            if finite_flux.size > 0 and np.allclose(finite_flux, 0.0, rtol=0.0, atol=0.0):
+                ylim = 1e-16 if getattr(spec, 'flux_unit', None) is not None else 1.0
+                fixed_zero_ylim = (-ylim, ylim)
+        if fixed_zero_ylim is not None:
+            self.enableAutoRange(axis='y', enable=False)
+            self.setYRange(float(fixed_zero_ylim[0]), float(fixed_zero_ylim[1]), padding=0.0)
+        else:
+            self.enableAutoRange(axis='y', enable=True)
         
         # Coordinate signal emission is now handled in navigation methods
 
