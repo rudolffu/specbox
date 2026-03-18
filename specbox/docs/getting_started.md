@@ -78,6 +78,7 @@ specbox-viewer --spectra COMBINED_SPECS.fits --spec-class euclid
 Notes:
 - If `--output-file` is omitted, viewer writes to `vi_{input_file_name}_results.csv`.
 - History is auto-loaded when that CSV already exists.
+- Add `--no-images` to disable the image panel and all cutout downloading.
 
 ### Euclid coadd (BGS+RGS)
 
@@ -87,6 +88,24 @@ specbox-coadd \
   --bgs-file sz_ragn_dr1_bgs_chunk_001.fits \
   --output-prefix coadd/sz_ragn_dr1_coadd_chunk_001 \
   --pair-by extname_intersection
+```
+
+### Raw Euclid FITS to parquet
+
+```bash
+specbox-euclid-parquet \
+  --fits sz_ragn_dr1_rgs_chunk_001.fits \
+  --output-prefix parquet/sz_ragn_dr1_rgs_chunk_001
+```
+
+### View Euclid parquet
+
+```bash
+# Raw single-arm Euclid parquet
+specbox-viewer --spectra parquet/sz_ragn_dr1_rgs_chunk_001_part001.parquet --spec-class euclid
+
+# Coadd parquet
+specbox-viewer --spectra coadd/sz_ragn_dr1_coadd_chunk_001_part001.parquet --spec-class euclid-coadd
 ```
 
 ### PCF redshift

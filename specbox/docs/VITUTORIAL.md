@@ -179,6 +179,8 @@ Use the CLI:
 specbox-viewer --spectra COMBINED_SPECS.fits --spec-class euclid
 ```
 
+Add `--no-images` to disable the image panel and skip all cutout downloads.
+
 The first time you run the tool in a new Python environment, `matplotlib` will take some time to build the font cache. Subsequent runs will be faster.
 
 ### Parameter Explanation
@@ -187,10 +189,12 @@ The first time you run the tool in a new Python environment, `matplotlib` will t
   The path to the FITS file containing the spectra.
 - **output_file:**  
   The CSV file where inspection results (object classification and redshift) are saved. If omitted, viewer uses `vi_{input_file_name}_results.csv`.
-- **z_max:**
+- **z_max:**  
   The maximum redshift to be considered for the slider. The default is 5.0.
 - **load_history:**  
   Optional CLI flag to force history loading. By default, history is auto-loaded when the output CSV exists.
+- **no-images:**  
+  Optional CLI flag to disable the image panel and all cutout downloading when remote cutouts are not needed or unavailable.
 
 ---
 

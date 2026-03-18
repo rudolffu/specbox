@@ -22,6 +22,8 @@ from .auxmodule.pcf_redshift import (
 )
 from .basemodule import SpecEuclid1d, SpecIRAF, SpecLAMOST, SpecSDSS, SpecSparcl
 from .examples.tools.build_euclid_bgs_rgs_coadd import build_coadds
+from .examples.tools.build_euclid_raw_parquet import build_raw_euclid_parquet
+from .basemodule import SpecEuclidCoaddRow
 
 
 def _iter_hdus(path: Path):
@@ -72,6 +74,7 @@ def _build_rows_from_batch_result(df_in: pd.DataFrame, result: Dict) -> list:
 def _spec_class_map() -> Dict[str, type]:
     return {
         "euclid": SpecEuclid1d,
+        "euclid-coadd": SpecEuclidCoaddRow,
         "sparcl": SpecSparcl,
         "lamost": SpecLAMOST,
         "sdss": SpecSDSS,
@@ -100,6 +103,11 @@ def viewer_cli() -> None:
     )
     parser.add_argument("--euclid-fits", default=None, help="Optional Euclid file for SPARCL overlay.")
     parser.add_argument("--cutout-buffer-dir", default=None, help="Optional cutout buffer directory.")
+    parser.add_argument(
+        "--no-images",
+        action="store_true",
+        help="Disable the image panel and all cutout downloading.",
+    )
     parser.add_argument("--disable-background-prefetch", action="store_true")
     parser.add_argument("--rgs-file", default=None, help="Dual-arm mode: RGS FITS file.")
     parser.add_argument("--bgs-file", default=None, help="Dual-arm mode: BGS FITS file.")
@@ -134,6 +142,7 @@ def viewer_cli() -> None:
         load_history=should_load_history,
         euclid_fits=args.euclid_fits,
         cutout_buffer_dir=args.cutout_buffer_dir,
+        enable_image_panel=not args.no_images,
         enable_background_prefetch=not args.disable_background_prefetch,
         rgs_file=args.rgs_file,
         bgs_file=args.bgs_file,
@@ -412,4 +421,18 @@ def coadd_cli() -> None:
         include_arms=args.include_arms,
         parquet_chunk_size=args.parquet_chunk_size,
         pair_by=args.pair_by,
+    )
+
+
+def euclid_parquet_cli() -> None:
+    parser = argparse.ArgumentParser(description="Build parquet partitions from raw single-arm Euclid FITS.")
+    parser.add_argument("--fits", required=True, help="Input raw Euclid combined FITS file")
+    parser.add_argument("--output-prefix", required=True, help="Output prefix (no extension)")
+    parser.add_argument("--parquet-chunk-size", type=int, default=2000, help="Rows per parquet chunk")
+    args = parser.parse_args()
+
+    build_raw_euclid_parquet(
+        fits_file=args.fits,
+        output_prefix=args.output_prefix,
+        parquet_chunk_size=args.parquet_chunk_size,
     )

@@ -1291,6 +1291,20 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             return None
 
     @staticmethod
+    def _is_dataframe_backed_path(filename):
+        if filename is None:
+            return False
+        suffix = Path(str(filename)).suffix.lower()
+        return suffix in {".parquet", ".pq"}
+
+    @classmethod
+    def count_in_file(cls, filename):
+        if cls._is_dataframe_backed_path(filename):
+            return SpecPandasRow.count_in_file(filename)
+        with fits.open(filename) as hdul:
+            return max(0, len(hdul) - 1)
+
+    @staticmethod
     def _clip_bounds_from_lrange(lrange, n_bins):
         """Return clipping bounds (start, stop) for known Euclid arms."""
         label = str(lrange).strip().upper() if lrange is not None else ""
@@ -1307,6 +1321,130 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             return 11, 511
         # Preserve legacy behavior for unknown layouts.
         return 11, min(511, int(n_bins))
+
+    @staticmethod
+    def _find_dataframe_row(df, ext=None, extname=None):
+        if extname not in (None, "") and "extname" in df.columns:
+            matches = df.index[df["extname"].astype(str) == str(extname)]
+            if len(matches) == 0:
+                raise KeyError(f"extname '{extname}' not found in dataframe.")
+            return int(matches[0])
+        if ext is None:
+            return 0
+        idx = int(ext) - 1
+        if idx < 0 or idx >= len(df):
+            raise IndexError(f"Row index {idx} out of range for dataframe length {len(df)}")
+        return idx
+
+    def _apply_mask_and_clip(self, wave, flux, err, data_length, *, clip=True, good_pixels_only=False):
+        wave = np.asarray(wave, dtype=float)
+        flux = np.asarray(flux, dtype=float)
+        err = np.asarray(err, dtype=float)
+        if clip:
+            start, stop = self._clip_bounds_from_lrange(self.lrange, int(data_length))
+            wave = wave[start:stop]
+            flux = flux[start:stop]
+            err = err[start:stop]
+            if self.mask is not None:
+                self.mask = np.asarray(self.mask)[start:stop]
+            if self.data is not None:
+                self.data = self.data[start:stop]
+        if self.mask is not None:
+            self.mask = np.asarray(self.mask)
+            self.bad_mask = (self.mask % 2 == 1) | (self.mask >= 64)
+            self.good_mask = ~self.bad_mask
+            if good_pixels_only:
+                wave = wave[self.good_mask]
+                flux = flux[self.good_mask]
+                err = err[self.good_mask]
+                self.mask = self.mask[self.good_mask]
+                if self.data is not None:
+                    self.data = self.data[self.good_mask]
+        elif good_pixels_only:
+            warnings.warn(
+                "good_pixels_only=True requested, but MASK column is missing; using all pixels.",
+                UserWarning,
+            )
+        return wave, flux, err
+
+    def _finalize_euclid_spectrum(self, *, wave, flux, err, objname, objid, filename, ext, ra, dec, z_ph, z_gaia, z_vi, z_temp):
+        self.wave = wave * self.wave_unit
+        self.flux = flux * self.flux_unit
+        self.err = err
+        self.spec = Spectrum(
+            spectral_axis=self.wave,
+            flux=self.flux,
+            uncertainty=StdDevUncertainty(self.err),
+        )
+        self.objname = objname
+        self.objid = objid
+        self.filename = filename
+        self.ext = ext
+        self.ra = ra
+        self.dec = dec
+        self.z_ph = z_ph
+        self.z_gaia = z_gaia
+        self.z_vi = z_vi
+        self.z_temp = z_temp
+        if self.z_temp is not None and self.z_temp > 0:
+            if abs(self.z_vi - self.z_temp) < 0.01 or self.z_vi == 0:
+                self.z_vi = self.z_temp
+        if self.z_vi is not None and self.z_vi > 0:
+            self.redshift = self.z_vi
+
+    def _read_dataframe_backed(self, filename, ext=None, extname=None, clip=True, good_pixels_only=False):
+        df = SpecPandasRow._read_dataframe_file(filename, file_format="parquet")
+        idx = self._find_dataframe_row(df, ext=ext, extname=extname)
+        row = df.iloc[idx]
+
+        self.hdu = None
+        self.data = None
+        self.mask = np.asarray(row["mask"], dtype=np.int64) if "mask" in df.columns and row["mask"] is not None else None
+        self.quality = np.asarray(row["quality"], dtype=float) if "quality" in df.columns and row["quality"] is not None else None
+        self.ndith = np.asarray(row["ndith"], dtype=np.int16) if "ndith" in df.columns and row["ndith"] is not None else None
+        self.bad_mask = None
+        self.good_mask = None
+        self.lrange = row.get("lrange", self.lrange)
+        self.good_pixels_only = good_pixels_only
+        self.wave_unit = u.Angstrom
+        self.flux_unit = u.erg / u.s / u.cm**2 / u.Angstrom
+
+        wave = np.asarray(row["wavelength"], dtype=float)
+        flux = np.asarray(row["flux"], dtype=float)
+        err = np.asarray(row["err"], dtype=float)
+        data_length = len(wave)
+        wave, flux, err = self._apply_mask_and_clip(
+            wave,
+            flux,
+            err,
+            data_length,
+            clip=clip,
+            good_pixels_only=good_pixels_only,
+        )
+
+        objname = row.get("objname", row.get("extname", row.get("objid", "Unknown")))
+        objid = row.get("objid", row.get("extname", idx))
+        if isinstance(objid, float) and np.isfinite(objid) and objid.is_integer():
+            objid = int(objid)
+        ext_value = row.get("ext", ext)
+        if isinstance(ext_value, float) and np.isfinite(ext_value) and ext_value.is_integer():
+            ext_value = int(ext_value)
+
+        self._finalize_euclid_spectrum(
+            wave=wave,
+            flux=flux,
+            err=err,
+            objname=objname,
+            objid=objid,
+            filename=filename,
+            ext=ext_value,
+            ra=row.get("ra", 0.0),
+            dec=row.get("dec", 0.0),
+            z_ph=row.get("z_ph", 0.0),
+            z_gaia=row.get("z_gaia", 0.0),
+            z_vi=row.get("z_vi", 0.0),
+            z_temp=row.get("z_temp", None),
+        )
 
     def __init__(self, filename=None, ext=None, extname=None, clip=True, good_pixels_only=False, redshift=None, lrange=None, *args, **kwargs):
         """
@@ -1362,6 +1500,10 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
                 Arm label used for clipping policy (e.g. ``'BGS'`` or ``'RGS'``).
                 If None, ``LRANGE`` is read from the HDU header.
         """
+        if self._is_dataframe_backed_path(filename):
+            self.read_parquet(filename, ext=ext, extname=extname, clip=clip, good_pixels_only=good_pixels_only, lrange=lrange, **kwargs)
+            return
+
         hdul = fits.open(filename)
         if extname is None and ext is None:
             print('No extension specified. Reading the first extension.')
@@ -1375,9 +1517,6 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         data = hdu.data
         header_lrange = hdu.header.get('LRANGE', hdu.header.get('LAMBRANG', None))
         self.lrange = lrange if lrange is not None else header_lrange
-        if clip:
-            start, stop = self._clip_bounds_from_lrange(self.lrange, len(data))
-            data = data[start:stop]
         self.good_pixels_only = good_pixels_only
         self.hdu = hdu
         self.data = data
@@ -1461,46 +1600,49 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         wave = data['WAVELENGTH']
         if data.dtype.names is not None and 'MASK' in data.dtype.names:
             self.mask = np.asarray(data['MASK'])
-            self.bad_mask = (self.mask % 2 == 1) | (self.mask >= 64)
-            self.good_mask = ~self.bad_mask
-            if good_pixels_only:
-                wave = wave[self.good_mask]
-                flux = flux[self.good_mask]
-                err = err[self.good_mask]
-                self.mask = self.mask[self.good_mask]
-                self.data = data[self.good_mask]
-        elif good_pixels_only:
-            warnings.warn(
-                "good_pixels_only=True requested, but MASK column is missing; using all pixels.",
-                UserWarning,
-            )
         self.wave_unit = wave_unit
         self.flux_unit = flux_unit
-        self.wave = wave * wave_scale * wave_unit
-        self.flux = flux * flux_scale_effective * flux_unit
-        self.err = err
-        self.spec = Spectrum(spectral_axis=self.wave, 
-                               flux=self.flux, 
-                               uncertainty=StdDevUncertainty(self.err))
-        self.objname = hdu.name
+        wave = np.asarray(wave, dtype=float) * wave_scale
+        flux = np.asarray(flux, dtype=float) * flux_scale_effective
+        err = np.asarray(err, dtype=float)
+        wave, flux, err = self._apply_mask_and_clip(
+            wave,
+            flux,
+            err,
+            len(data),
+            clip=clip,
+            good_pixels_only=good_pixels_only,
+        )
+        objname = hdu.name
         try:
-            self.objid = int(hdu.name)
+            objid = int(hdu.name)
         except ValueError:
-            self.objid = hdu.name  # fallback if conversion fails
-        self.filename = filename
-        self.ext = ext
-        self.ra = hdu.header.get('RA', hdu.header.get('RA_OBJ', 0.0))
-        self.dec = hdu.header.get('DEC', hdu.header.get('DEC_OBJ', 0.0))
-        self.z_ph = hdu.header.get('Z_PH', 0.0)
-        self.z_gaia = hdu.header.get('Z_GAIA', 0.0)
-        self.z_vi = hdu.header.get('Z_VI', 0.0)
-        self.z_temp = hdu.header.get('Z_TEMP', None)
-        
-        if self.z_temp is not None and self.z_temp > 0:
-            if abs(self.z_vi - self.z_temp) < 0.01 or self.z_vi == 0:
-                self.z_vi = self.z_temp
-        if self.z_vi is not None and self.z_vi > 0:
-            self.redshift = self.z_vi
+            objid = hdu.name
+        self._finalize_euclid_spectrum(
+            wave=wave,
+            flux=flux,
+            err=err,
+            objname=objname,
+            objid=objid,
+            filename=filename,
+            ext=ext,
+            ra=hdu.header.get('RA', hdu.header.get('RA_OBJ', 0.0)),
+            dec=hdu.header.get('DEC', hdu.header.get('DEC_OBJ', 0.0)),
+            z_ph=hdu.header.get('Z_PH', 0.0),
+            z_gaia=hdu.header.get('Z_GAIA', 0.0),
+            z_vi=hdu.header.get('Z_VI', 0.0),
+            z_temp=hdu.header.get('Z_TEMP', None),
+        )
+
+    def read_parquet(self, filename, ext=None, extname=None, clip=True, good_pixels_only=False, lrange=None, **kwargs):
+        self.lrange = lrange
+        self._read_dataframe_backed(
+            filename,
+            ext=ext,
+            extname=extname,
+            clip=clip,
+            good_pixels_only=good_pixels_only,
+        )
 
     @property
     def z_vi(self):

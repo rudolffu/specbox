@@ -79,14 +79,21 @@ python -m pip install .
 
 - `specbox-viewer`: launch the enhanced viewer
 - `specbox-coadd`: coadd Euclid BGS+RGS chunks
+- `specbox-euclid-parquet`: convert raw single-arm Euclid combined FITS to parquet
 - `specbox-pcf`: run template PCF redshift and write `Z_TEMP`
 
 ```bash
 # Viewer (history auto-loads when output CSV already exists)
 specbox-viewer --spectra your_spectra.fits --spec-class euclid
 
+# Viewer without image panel or cutout downloads
+specbox-viewer --spectra your_spectra.fits --spec-class euclid --no-images
+
 # Coadd paired Euclid arms (default: EXTNAME intersection)
 specbox-coadd --rgs-file rgs_chunk.fits --bgs-file bgs_chunk.fits --output-prefix coadd/out_chunk_001
+
+# Convert raw single-arm Euclid FITS to parquet
+specbox-euclid-parquet --fits rgs_chunk.fits --output-prefix parquet/rgs_chunk_001
 
 # PCF default: Type 1 only
 specbox-pcf --fits coadd/out_chunk_001.fits
@@ -132,6 +139,23 @@ from specbox.basemodule import SpecSparcl
 sp1 = SpecSparcl("sparcl_spectra.parquet", ext=1)
 sp1.plot()
 ```
+
+#### Reading raw Euclid spectra from parquet rows
+```python
+from specbox.basemodule import SpecEuclid1d
+
+sp = SpecEuclid1d("sz_ragn_dr1_rgs_chunk_001_part001.parquet", ext=1)
+sp.plot()
+```
+
+#### Run the viewer on Euclid coadd parquet
+```bash
+specbox-viewer \
+  --spectra coadd/sz_ragn_dr1_coadd_chunk_001_part001.parquet \
+  --spec-class euclid-coadd
+```
+
+Add `--no-images` when cutouts are unavailable or should be skipped entirely.
 
 #### Run a `PGSpecPlotThread` for visual inspection of a list of spectra
 ```python

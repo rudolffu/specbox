@@ -1627,7 +1627,8 @@ class PGSpecPlotAppEnhanced(QApplication):
 
     def __init__(self, spectra, SpecClass=SpecEuclid1d,
                  output_file='vi_output.csv', z_max=5.0, load_history=False,
-                 euclid_fits=None, cutout_buffer_dir=None, enable_background_prefetch=True,
+                 euclid_fits=None, cutout_buffer_dir=None, enable_image_panel=True,
+                 enable_background_prefetch=True,
                  rgs_file=None, bgs_file=None, ext=None, extname=None,
                  dual_good_pixels_only=False):
         super().__init__(sys.argv)
@@ -1635,7 +1636,8 @@ class PGSpecPlotAppEnhanced(QApplication):
         self.spectra = spectra
         self.SpecClass = SpecClass
         self.euclid_fits = euclid_fits
-        self.enable_background_prefetch = enable_background_prefetch
+        self.enable_image_panel = bool(enable_image_panel)
+        self.enable_background_prefetch = bool(enable_background_prefetch) and self.enable_image_panel
         self.rgs_file = rgs_file
         self.bgs_file = bgs_file
         self.dual_ext = ext
@@ -1689,29 +1691,27 @@ class PGSpecPlotAppEnhanced(QApplication):
             dual_good_pixels_only=self.dual_good_pixels_only)
         self.len_list = self.plot.len_list
         
-        # Create buffer directory for cutouts
-        if cutout_buffer_dir is not None:
-            buffer_dir = Path(cutout_buffer_dir)
-        elif self._dual_mode:
-            buffer_dir = Path(self.rgs_file).parent / "cutout_buffer"
-        elif isinstance(spectra, str):  # Single FITS file
-            buffer_dir = Path(spectra).parent / "cutout_buffer"
-        else:  # List of files
-            buffer_dir = Path(spectra[0]).parent / "cutout_buffer"
-        
-        # Create image cutout widget with buffer directory
-        self.cutout_widget = ImageCutoutWidget(buffer_dir=buffer_dir)
-        self.cutout_widget.qa_contamination_cb.stateChanged.connect(self.on_qa_flag_changed)
-        self.cutout_widget.qa_unusable_cb.stateChanged.connect(self.on_qa_flag_changed)
-        
-        # Connect signals - need a wrapper to pass object ID
-        self.plot.coordinate_changed.connect(self.on_coordinate_changed)
-        
-        # Trigger initial image load for first spectrum
-        if hasattr(self.plot, 'spec') and hasattr(self.plot.spec, 'ra') and hasattr(self.plot.spec, 'dec'):
-            objid = getattr(self.plot.spec, 'objid', None)
-            self.cutout_widget.load_online_cutouts(self.plot.spec.ra, self.plot.spec.dec, objid)
-        self.sync_qa_checkbox_from_current_spec()
+        self.cutout_widget = None
+        if self.enable_image_panel:
+            if cutout_buffer_dir is not None:
+                buffer_dir = Path(cutout_buffer_dir)
+            elif self._dual_mode:
+                buffer_dir = Path(self.rgs_file).parent / "cutout_buffer"
+            elif isinstance(spectra, str):  # Single FITS file
+                buffer_dir = Path(spectra).parent / "cutout_buffer"
+            else:  # List of files
+                buffer_dir = Path(spectra[0]).parent / "cutout_buffer"
+
+            self.cutout_widget = ImageCutoutWidget(buffer_dir=buffer_dir)
+            self.cutout_widget.qa_contamination_cb.stateChanged.connect(self.on_qa_flag_changed)
+            self.cutout_widget.qa_unusable_cb.stateChanged.connect(self.on_qa_flag_changed)
+
+            self.plot.coordinate_changed.connect(self.on_coordinate_changed)
+
+            if hasattr(self.plot, 'spec') and hasattr(self.plot.spec, 'ra') and hasattr(self.plot.spec, 'dec'):
+                objid = getattr(self.plot.spec, 'objid', None)
+                self.cutout_widget.load_online_cutouts(self.plot.spec.ra, self.plot.spec.dec, objid)
+            self.sync_qa_checkbox_from_current_spec()
             
         # Start background prefetching for next objects
         if self.enable_background_prefetch:
@@ -1722,12 +1722,16 @@ class PGSpecPlotAppEnhanced(QApplication):
     
     def on_coordinate_changed(self, ra, dec):
         """Handle coordinate changes and pass object ID to cutout widget."""
+        if self.cutout_widget is None:
+            return
         objid = getattr(self.plot.spec, 'objid', None) if hasattr(self.plot, 'spec') else None
         self.cutout_widget.load_online_cutouts(ra, dec, objid)
         self.sync_qa_checkbox_from_current_spec()
 
     def sync_qa_checkbox_from_current_spec(self):
         """Restore QA checkboxes from current spec/history."""
+        if self.cutout_widget is None:
+            return
         if not hasattr(self.plot, 'spec'):
             return
         spec = self.plot.spec
@@ -1742,6 +1746,8 @@ class PGSpecPlotAppEnhanced(QApplication):
 
     def on_qa_flag_changed(self, _state):
         """Persist QA flag from checkbox selections into current spec/history."""
+        if self.cutout_widget is None:
+            return
         if not hasattr(self.plot, 'spec'):
             return
         spec = self.plot.spec
@@ -1854,12 +1860,12 @@ class PGSpecPlotAppEnhanced(QApplication):
             template_group.setLayout(template_layout)
             toolbar_layout.addWidget(template_group)
             
-            # Image panel toggle
-            self.image_toggle_btn = QPushButton("Hide Images")
-            self.image_toggle_btn.clicked.connect(self.toggle_image_panel)
-            self.image_toggle_btn.setCheckable(True)
-            self.image_toggle_btn.setMaximumHeight(35)  # Make button more compact
-            toolbar_layout.addWidget(self.image_toggle_btn)
+            if self.enable_image_panel:
+                self.image_toggle_btn = QPushButton("Hide Images")
+                self.image_toggle_btn.clicked.connect(self.toggle_image_panel)
+                self.image_toggle_btn.setCheckable(True)
+                self.image_toggle_btn.setMaximumHeight(35)  # Make button more compact
+                toolbar_layout.addWidget(self.image_toggle_btn)
 
             toolbar_layout.addWidget(QLabel("Go to index:"))
             self.goto_index_spin = QSpinBox()
@@ -1939,12 +1945,12 @@ class PGSpecPlotAppEnhanced(QApplication):
             left_widget.setLayout(left_layout)
             main_splitter.addWidget(left_widget)
             
-            # Right side: image cutouts (initially visible)
-            main_splitter.addWidget(self.cutout_widget)
-            
-            # Set initial splitter sizes (80% spectrum, 20% cutouts)
-            main_splitter.setSizes([800, 200])
-            main_splitter.setCollapsible(1, True)  # Make cutout panel collapsible
+            if self.enable_image_panel and self.cutout_widget is not None:
+                main_splitter.addWidget(self.cutout_widget)
+                main_splitter.setSizes([800, 200])
+                main_splitter.setCollapsible(1, True)  # Make cutout panel collapsible
+            else:
+                main_splitter.setSizes([1000])
             
             layout.addWidget(main_splitter, row=2, col=0, colspan=2)
             
@@ -2082,6 +2088,8 @@ class PGSpecPlotAppEnhanced(QApplication):
     
     def toggle_image_panel(self):
         """Toggle visibility of the image cutout panel."""
+        if not self.enable_image_panel or self.cutout_widget is None:
+            return
         if self.image_toggle_btn.isChecked():
             # Hide images
             self.main_splitter.setSizes([1000, 0])
@@ -2138,6 +2146,7 @@ class PGSpecPlotThreadEnhanced(QThread):
     def __init__(self, spectra=None, SpecClass=SpecEuclid1d, specfile=None, **kwargs):
         super().__init__()
         explicit_buffer_dir = kwargs.pop("cutout_buffer_dir", None)
+        self.enable_image_panel = bool(kwargs.get("enable_image_panel", True))
         self.rgs_file = kwargs.get("rgs_file", None)
         self.bgs_file = kwargs.get("bgs_file", None)
         self.dual_ext = kwargs.get("ext", None)
@@ -2157,12 +2166,14 @@ class PGSpecPlotThreadEnhanced(QThread):
         self.SpecClass = SpecClass
         self.app = None
         self._skip_window = False
-        self._disable_background_prefetch = False
-        self.buffer_dir = Path(explicit_buffer_dir) if explicit_buffer_dir else self._resolve_buffer_dir(self.spectra)
+        self._disable_background_prefetch = not self.enable_image_panel
+        self.buffer_dir = None
+        if self.enable_image_panel:
+            self.buffer_dir = Path(explicit_buffer_dir) if explicit_buffer_dir else self._resolve_buffer_dir(self.spectra)
 
-        if self._should_offer_predownload(self.buffer_dir):
-            if self._prompt_for_bulk_download():
-                self._skip_window = self._run_bulk_predownload()
+            if self._should_offer_predownload(self.buffer_dir):
+                if self._prompt_for_bulk_download():
+                    self._skip_window = self._run_bulk_predownload()
 
         if not self._skip_window:
             if "enable_background_prefetch" not in kwargs:
