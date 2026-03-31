@@ -951,14 +951,15 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             annotation_flux_parts = [np.asarray(flux)]
 
             if is_sparcl:
-                self.plot(wave, flux, pen=pg.mkPen((0, 0, 255, 80), width=1), antialias=True)
+                self.plot(wave, flux, pen=pg.mkPen((0, 0, 255, 40), width=1), antialias=True)
                 n = int(len(flux))
                 if n >= 7:
                     window_length = min(31, n if n % 2 == 1 else n - 1)
                     if window_length >= 7:
                         polyorder = 3 if window_length > 3 else 2
                         flux_sm = savgol_filter(flux, window_length=window_length, polyorder=polyorder)
-                        self.plot(wave, flux_sm, pen=pg.mkPen('k', width=3), antialias=True)
+                        self.flux_sm = flux_sm
+                        self.plot(wave, flux_sm, pen=pg.mkPen('k', width=3.5), antialias=True)
 
                 euclid_object_id = getattr(spec, "euclid_object_id", None)
                 dr_text = str(getattr(spec, "data_release", "") or "")
@@ -1050,6 +1051,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         template = self.template_manager.get_template(self.template_manager.current_template)
         if template is not None:
             z_vi = getattr(spec, 'z_vi', getattr(spec, 'redshift', 0.0))
+            # print(f"Plotting template '{self.template_manager.current_template}' with z_vi={z_vi:.4f}")
             if z_vi is None:
                 z_vi = 0.0
             wave_temp = template['wave'] * (1 + z_vi)
@@ -1101,6 +1103,12 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         if fixed_zero_ylim is not None:
             self.enableAutoRange(axis='y', enable=False)
             self.setYRange(float(fixed_zero_ylim[0]), float(fixed_zero_ylim[1]), padding=0.0)
+        elif is_sparcl:
+            self.enableAutoRange(axis='y', enable=False)
+            y1, y2 = np.percentile(flux_sm[np.isfinite(flux_sm)], [0.01, 99.99])
+            ymin = y1 - 0.1 * (y2 - y1)
+            ymax = y2 + 0.1 * (y2 - y1)
+            self.setYRange(ymin, ymax, padding=0.05)
         else:
             self.enableAutoRange(axis='y', enable=True)
         
@@ -1288,14 +1296,15 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         y_ref = None
         if hasattr(self, 'flux') and self.flux is not None and len(self.flux) > 0:
             try:
-                y_ref = float(np.nanmax(self.flux))
+                flux_to_use = self.flux_sm if hasattr(self, 'flux_sm') and self.flux_sm is not None else self.flux
+                y_ref = float(np.nanmax(flux_to_use))
             except Exception:
                 y_ref = None
         if y_ref is None or not np.isfinite(y_ref):
             y_ref = 0.0
         y_base = y_ref * 0.92 if y_ref != 0 else 0.0
 
-        pen = pg.mkPen((140, 140, 140), width=2, style=Qt.DashLine)
+        pen = pg.mkPen((255, 0, 0), width=2, style=Qt.DashLine)
         text_color = (80, 80, 80)
 
         lines = _TEMPLATE_EMISSION_LINES
@@ -1335,6 +1344,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         
         if spec.objid in self.history:
             spec.z_vi = self.history[spec.objid][4]
+            # print(f"\tRedshift from history: {spec.z_vi:.4f}.")
             if len(self.history[spec.objid]) > 7:
                 spec.qa_flag = self.history[spec.objid][7]
             class_vi = self.history[spec.objid][3]
@@ -1526,9 +1536,17 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             print("\tClass: QSO(narrow).")
             self.history[spec.objid] = _history_payload('QSO(narrow)', spec.z_vi)
             self.update_spectrum_info_label()
+        elif event.key() == Qt.Key_B:
+            print("\tClass: QSO(BAL).")
+            self.history[spec.objid] = _history_payload('QSO(BAL)', spec.z_vi)
+            self.update_spectrum_info_label()
         elif event.key() == Qt.Key_U:
             print("\tClass: UNKNOWN.")
             self.history[spec.objid] = _history_payload('UNKNOWN', 0.0)
+            self.update_spectrum_info_label()
+        elif event.key() == Qt.Key_D:
+            print("\tClass: BAD spectrum.")
+            self.history[spec.objid] = _history_payload('BAD', 0.0)
             self.update_spectrum_info_label()
         elif event.key() == Qt.Key_L:
             print("\tClass: LIKELY/Unusual QSO.")
@@ -1909,7 +1927,8 @@ class PGSpecPlotAppEnhanced(QApplication):
             # Instructions with comprehensive keyboard shortcuts
             instruction_text = (
                 "Navigation: 'Q' next spectrum, Left/Right arrows previous/next | "
-                "Classification: 'A' QSO(AGN), 'N' QSO(narrow), 'S' STAR, 'G' GALAXY, 'U' UNKNOWN, 'L' LIKELY | "
+                "Classification: 'A' QSO(AGN), 'N' QSO(Narrow), 'B' QSO(BAL), 'D' BAD spectrum, |"
+                "'S' STAR, 'G' GALAXY, 'U' UNKNOWN, 'L' LIKELY QSO | "
                 "Tools: 'Space' wavelength info, 'M' mouse position, 'R' reset zoom | "
                 "Advanced: Ctrl+R reload, Ctrl+Left first, Ctrl+Right last, Ctrl+B resume from history"
             )
