@@ -20,7 +20,7 @@ from .auxmodule.pcf_redshift import (
     update_fits_z_temp,
     update_parquet_z_temp,
 )
-from .basemodule import SpecAimszReview, SpecEuclid1d, SpecIRAF, SpecLAMOST, SpecSDSS, SpecSparcl
+from .basemodule import SpecEuclid1d, SpecIRAF, SpecLAMOST, SpecSDSS, SpecSparcl
 from .examples.tools.build_euclid_bgs_rgs_coadd import build_coadds
 from .examples.tools.build_euclid_raw_parquet import build_raw_euclid_parquet
 from .basemodule import SpecEuclidCoaddRow
@@ -75,7 +75,6 @@ def _spec_class_map() -> Dict[str, type]:
     return {
         "euclid": SpecEuclid1d,
         "euclid-coadd": SpecEuclidCoaddRow,
-        "aimsz-review": SpecAimszReview,
         "sparcl": SpecSparcl,
         "lamost": SpecLAMOST,
         "sdss": SpecSDSS,
