@@ -238,13 +238,24 @@ When the tool is active, use the following keys:
   Classifies the spectrum as **QSO (AGN)**.
 
 - **N:**  
-  Classifies the spectrum as **QSO (narrow)**.
+  Classifies the spectrum as **QSO(Narrow)**.
 
 - **U:**  
   Classifies the spectrum as **UNKNOWN**.
 
 - **L:**  
   Classifies the spectrum as **LIKELY/Unusual QSO**.
+
+In `aimsz-review` mode, additional review shortcuts are enabled and the stored labels are normalized:
+
+- **B:**  
+  Classifies the spectrum as **QSO(BAL)** and stores `QSO_BAL`.
+
+- **D:**  
+  Classifies the spectrum as **BAD** and stores `BAD`.
+
+- **L:**  
+  Stores `LIKELY_Q` in review mode, while still accepting legacy `LIKELY` when loading older CSVs.
 
 - **M:**  
   Prints the current mouse position in the plot (useful for measurements).
@@ -278,6 +289,24 @@ When the tool is active, use the following keys:
 
 - **Saving Results:**  
   The tool saves classifications to the specified CSV file (with columns for object ID, object name, RA, DEC, assigned class, and visually inspected redshift `z_vi`) periodically and when exiting.
+
+For `aimsz-review`, the saved CSV also carries:
+- `object_id`
+- `targetid`
+- `data_release`
+- `qa_flag`
+- `notes`
+
+The canonical review labels written in this mode are:
+- `QSO_DEFAULT`
+- `QSO`
+- `QSO_NARROW`
+- `QSO_BAL`
+- `LIKELY_Q`
+- `GALAXY`
+- `STAR`
+- `UNKNOWN`
+- `BAD`
 
 - **Loading History:**  
   The tool reads the output CSV when it exists and loads object IDs into a dictionary. It then skips spectra that already exist in history, so you can resume where you left off.

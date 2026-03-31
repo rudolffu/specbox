@@ -594,6 +594,86 @@ class SpecSparcl(SpecPandasRow):
             self.objid = getattr(self, "sparcl_id", getattr(self, "specid", getattr(self, "_row", 0)))
 
 
+class SpecAimszReview(SpecPandasRow):
+    """Reader for AIMS-z review bundles stored as a dataframe/parquet table."""
+
+    def __init__(
+        self,
+        filename: Optional[Union[str, Path]] = None,
+        *args,
+        df: Optional[pd.DataFrame] = None,
+        ext: int = 1,
+        row: Optional[int] = None,
+        file_format: Optional[str] = None,
+        pandas_read_kwargs: Optional[Mapping[str, Any]] = None,
+        wave_unit: Optional[u.Unit] = u.Angstrom,
+        flux_unit: Optional[u.Unit] = 1e-17 * u.erg / u.s / u.cm**2 / u.Angstrom,
+        **kwargs,
+    ):
+        super().__init__(
+            filename=filename,
+            df=df,
+            ext=ext,
+            row=row,
+            file_format=file_format,
+            pandas_read_kwargs=pandas_read_kwargs,
+            wave_col="wavelength",
+            flux_col="flux",
+            ivar_col="ivar",
+            err_col=None,
+            wave_unit=wave_unit,
+            flux_unit=flux_unit,
+            meta_cols=(
+                "object_id",
+                "objid",
+                "objname",
+                "ra",
+                "dec",
+                "redshift",
+                "specid",
+                "targetid",
+                "spectype",
+                "data_release",
+                "_dr",
+                "spectra_row",
+                "review_priority_tier",
+                "review_score",
+                "review_rank_within_tier",
+                "review_slice_label",
+                "delta_z_norm",
+                "z_ref",
+                "z_ml_expect",
+                "z_pcf_best",
+                "pcf_template_best",
+                "pcf_score_best",
+                "top1_prob",
+                "suspect_v1",
+                "gray_v1",
+                "anchor_v1",
+                "class_vi",
+                "z_vi",
+                "qa_flag",
+                "notes",
+            ),
+            array_cols={"mask": "mask", "model": "model"},
+            *args,
+            **kwargs,
+        )
+
+        if not hasattr(self, "objname"):
+            if hasattr(self, "ra") and hasattr(self, "dec"):
+                try:
+                    self.objname = designation(self.ra, self.dec)
+                except Exception:
+                    self.objname = "Unknown"
+            else:
+                self.objname = "Unknown"
+        if hasattr(self, "object_id"):
+            self.objid = str(self.object_id)
+        elif not hasattr(self, "objid"):
+            self.objid = getattr(self, "specid", getattr(self, "_row", 0))
+
+
 class SpecEuclidCoaddRow(SpecPandasRow):
     """Reader for Euclid BGS+RGS coadd spectra stored in dataframe files.
 

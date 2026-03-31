@@ -115,6 +115,7 @@ The main classes and functions of specbox are:
 - `SpecEuclidCoaddRow`: reader for dataframe/parquet rows containing coadded spectra arrays.
 - `SpecPandasRow`: generic reader for "table-of-spectra" files readable by pandas (parquet/csv/feather/...), where each row stores arrays (e.g. wavelength/flux/ivar).
 - `SpecSparcl`: SPARCL parquet/table reader (e.g., for file `sparcl_spectra.parquet`). Common metadata columns include `data_release`, `targetid`, and (optional) `euclid_object_id` for Euclid overlay.
+- `SpecAimszReview`: AIMS-z review-bundle reader for `review_bundle_specbox.parquet`, including review metadata such as `object_id`, `review_priority_tier`, `z_ref`, `z_ml_expect`, and `z_pcf_best`.
 #### `qtmodule.py`:
 - `PGSpecPlot`: class to plot spectra in a `pyqtgraph` plot.
 - `PGSpecPlotApp`: class to create a `pyqtgraph` plot with a `QApplication` instance.
@@ -194,3 +195,36 @@ Notes:
 - Results CSV includes `targetid` and `data_release` (when available from the input table).
 - The enhanced viewer has a `Save PNG` button that writes screenshots to `./saved_pngs/`.
 <img src="specbox/docs/figs/PGSpecPlotThreadEnhanced_example.jpg" width="600">
+
+#### Review an AIMS-z bundle parquet
+```bash
+specbox-viewer \
+  --spectra review_bundle_specbox.parquet \
+  --spec-class aimsz-review
+```
+
+`aimsz-review` uses the same row-wise parquet transport style as `SpecSparcl`, but adds review context in the info panel and writes a reviewer-facing CSV with:
+- `object_id`
+- `objid`
+- `objname`
+- `targetid`
+- `ra`
+- `dec`
+- `data_release`
+- `class_vi`
+- `z_vi`
+- `qa_flag`
+- `notes`
+
+Canonical stored `class_vi` values in review mode are:
+- `QSO_DEFAULT`
+- `QSO`
+- `QSO_NARROW`
+- `QSO_BAL`
+- `LIKELY_Q`
+- `GALAXY`
+- `STAR`
+- `UNKNOWN`
+- `BAD`
+
+Legacy labels such as `QSO(Default)`, `QSO(narrow)`, `QSO(Narrow)`, `QSO(BAL)`, and `LIKELY` are accepted on load and normalized automatically.

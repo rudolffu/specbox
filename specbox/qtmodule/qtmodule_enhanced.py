@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (QApplication, QFrame, QWidget, QSlider, QHBoxLayo
                                QVBoxLayout, QGridLayout, QDoubleSpinBox, QPushButton, 
                                QLabel, QButtonGroup, QRadioButton, QGroupBox, 
                                QFileDialog, QMessageBox, QComboBox, QProgressBar, QSpinBox,
+                               QLineEdit,
                                QScrollArea, QCheckBox, QDialog, QTextEdit, QSplitter)
 import sys
 from ..basemodule import *
@@ -78,6 +79,71 @@ _TEMPLATE_EMISSION_LINES = [
     ("Pa β", 12821.6),
 ]
 _TEMPLATE_COLOR = (220, 0, 0, 230)
+HISTORY_TARGETID_INDEX = 5
+HISTORY_DATA_RELEASE_INDEX = 6
+HISTORY_QA_FLAG_INDEX = 7
+HISTORY_OBJECT_ID_INDEX = 8
+HISTORY_NOTES_INDEX = 9
+HISTORY_REVIEWER_INDEX = 10
+HISTORY_REVIEWED_AT_INDEX = 11
+REVIEW_HISTORY_LEN = 12
+REVIEW_CLASS_DISPLAY = {
+    "QSO_DEFAULT": "QSO(Default)",
+    "QSO": "QSO",
+    "QSO_NARROW": "QSO(Narrow)",
+    "QSO_BAL": "QSO(BAL)",
+    "LIKELY_Q": "LIKELY_Q",
+    "GALAXY": "GALAXY",
+    "STAR": "STAR",
+    "UNKNOWN": "UNKNOWN",
+    "BAD": "BAD",
+}
+REVIEW_CLASS_ALIAS = {
+    "QSO(DEFAULT)": "QSO_DEFAULT",
+    "QSO_DEFAULT": "QSO_DEFAULT",
+    "QSO": "QSO",
+    "QSO(NARROW)": "QSO_NARROW",
+    "QSO_NARROW": "QSO_NARROW",
+    "QSO(BAL)": "QSO_BAL",
+    "QSO_BAL": "QSO_BAL",
+    "LIKELY": "LIKELY_Q",
+    "LIKELY_Q": "LIKELY_Q",
+    "GALAXY": "GALAXY",
+    "STAR": "STAR",
+    "UNKNOWN": "UNKNOWN",
+    "BAD": "BAD",
+}
+
+
+def normalize_review_class_vi(value):
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return ""
+    token = str(value).strip()
+    if not token:
+        return ""
+    normalized = token.upper().replace(" ", "")
+    return REVIEW_CLASS_ALIAS.get(normalized, token)
+
+
+def display_review_class_vi(value):
+    normalized = normalize_review_class_vi(value)
+    if normalized in REVIEW_CLASS_DISPLAY:
+        return REVIEW_CLASS_DISPLAY[normalized]
+    return "" if normalized in (None, "") else str(value)
+
+
+def _is_aimsz_review_spec(spec):
+    return "SpecAimszReview" in globals() and isinstance(spec, SpecAimszReview)
+
+
+def _ensure_history_row_shape(row, review_mode=False):
+    values = list(row)
+    target_len = REVIEW_HISTORY_LEN if review_mode else 8
+    if len(values) < target_len:
+        values.extend([None] * (target_len - len(values)))
+    if review_mode and len(values) > 3:
+        values[3] = normalize_review_class_vi(values[3])
+    return values
 
 
 class ImageCutoutWidget(QWidget):
@@ -1116,6 +1182,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         z_gaia = getattr(spec, 'z_gaia', None)
         objname = getattr(spec, 'objname', 'Unknown')
         objid = getattr(spec, 'objid', 'Unknown')
+        review_mode = _is_aimsz_review_spec(spec)
         class_vi = None
         dual_diag = None
         if objid in self.history and len(self.history[objid]) > 3:
@@ -1151,15 +1218,16 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         if message:
             parts.append(message)
         parts.append(f"ID: {objid}")
-        if 'SpecSparcl' in globals() and isinstance(spec, SpecSparcl):
+        if ('SpecSparcl' in globals() and isinstance(spec, SpecSparcl)) or review_mode:
             targetid = getattr(spec, 'targetid', None)
             if targetid not in (None, "", 0):
                 parts.append(f"targetid: {targetid}")
         parts.append(_fmt_z("z_vi", z_vi, hide_zero=False) or "z_vi = -")
         if class_vi not in (None, ""):
-            parts.append(f"class_vi: {class_vi}")
+            display_class = display_review_class_vi(class_vi) if review_mode else class_vi
+            parts.append(f"class_vi: {display_class}")
 
-        if 'SpecSparcl' in globals() and isinstance(spec, SpecSparcl):
+        if ('SpecSparcl' in globals() and isinstance(spec, SpecSparcl)) or review_mode:
             dr = str(getattr(spec, 'data_release', '') or '')
             if 'desi' in dr.lower():
                 parts.append(_fmt_z("z_desi", getattr(spec, 'redshift', None), hide_zero=False) or "z_desi = -")
@@ -1167,6 +1235,28 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         z_gaia_str = _fmt_z("z_gaia", z_gaia, hide_zero=True)
         if z_gaia_str is not None:
             parts.append(z_gaia_str)
+        if review_mode:
+            for label, attr in (
+                ("tier", "review_priority_tier"),
+                ("score", "review_score"),
+                ("z_ref", "z_ref"),
+                ("z_ml", "z_ml_expect"),
+                ("z_pcf", "z_pcf_best"),
+                ("pcf_template", "pcf_template_best"),
+                ("pcf_score", "pcf_score_best"),
+            ):
+                value = getattr(spec, attr, None)
+                if value in (None, ""):
+                    continue
+                if label.startswith("z_") or label == "score" or label == "pcf_score":
+                    try:
+                        numeric = float(value)
+                    except Exception:
+                        numeric = None
+                    if numeric is not None and np.isfinite(numeric):
+                        parts.append(f"{label}: {numeric:.4f}")
+                        continue
+                parts.append(f"{label}: {value}")
         if self.spec_dual is not None:
             dual = self.spec_dual
             scale = float(getattr(dual, "arm_scale_bgs_to_rgs", 1.0))
@@ -1334,10 +1424,16 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             return
         
         if spec.objid in self.history:
-            spec.z_vi = self.history[spec.objid][4]
-            if len(self.history[spec.objid]) > 7:
-                spec.qa_flag = self.history[spec.objid][7]
-            class_vi = self.history[spec.objid][3]
+            row = _ensure_history_row_shape(self.history[spec.objid], review_mode=_is_aimsz_review_spec(spec))
+            self.history[spec.objid] = row
+            spec.z_vi = row[4]
+            spec.qa_flag = row[HISTORY_QA_FLAG_INDEX]
+            spec.class_vi = row[3]
+            if _is_aimsz_review_spec(spec):
+                spec.notes = row[HISTORY_NOTES_INDEX] or ""
+                class_vi = display_review_class_vi(row[3])
+            else:
+                class_vi = row[3]
             print(f"\tVisual class from history: {class_vi}.")
             
         self.update_slider_and_spin()
@@ -1372,10 +1468,16 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                 return
             
             if spec.objid in self.history:
-                spec.z_vi = self.history[spec.objid][4]
-                if len(self.history[spec.objid]) > 7:
-                    spec.qa_flag = self.history[spec.objid][7]
-                class_vi = self.history[spec.objid][3]
+                row = _ensure_history_row_shape(self.history[spec.objid], review_mode=_is_aimsz_review_spec(spec))
+                self.history[spec.objid] = row
+                spec.z_vi = row[4]
+                spec.qa_flag = row[HISTORY_QA_FLAG_INDEX]
+                spec.class_vi = row[3]
+                if _is_aimsz_review_spec(spec):
+                    spec.notes = row[HISTORY_NOTES_INDEX] or ""
+                    class_vi = display_review_class_vi(row[3])
+                else:
+                    class_vi = row[3]
                 print(f"\tVisual class from history: {class_vi}.")
                 
             self.counter = target + 1
@@ -1413,10 +1515,16 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self.spec = spec
 
         if spec.objid in self.history:
-            spec.z_vi = self.history[spec.objid][4]
-            if len(self.history[spec.objid]) > 7:
-                spec.qa_flag = self.history[spec.objid][7]
-            class_vi = self.history[spec.objid][3]
+            row = _ensure_history_row_shape(self.history[spec.objid], review_mode=_is_aimsz_review_spec(spec))
+            self.history[spec.objid] = row
+            spec.z_vi = row[4]
+            spec.qa_flag = row[HISTORY_QA_FLAG_INDEX]
+            spec.class_vi = row[3]
+            if _is_aimsz_review_spec(spec):
+                spec.notes = row[HISTORY_NOTES_INDEX] or ""
+                class_vi = display_review_class_vi(row[3])
+            else:
+                class_vi = row[3]
             print(f"\tVisual class from history: {class_vi}.")
 
         self.counter = index_one_based
@@ -1426,6 +1534,36 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
 
         if hasattr(self.spec, 'ra') and hasattr(self.spec, 'dec'):
             self.coordinate_changed.emit(self.spec.ra, self.spec.dec)
+
+    def _history_rows_to_dataframe(self):
+        review_mode = _is_aimsz_review_spec(getattr(self, "spec", None))
+        rows = []
+        for objid_key, raw in self.history.items():
+            if len(raw) < 5:
+                continue
+            row = _ensure_history_row_shape(raw, review_mode=review_mode)
+            payload = {
+                "objid": objid_key,
+                "objname": row[0],
+                "ra": row[1],
+                "dec": row[2],
+                "class_vi": row[3],
+                "z_vi": row[4],
+                "targetid": row[HISTORY_TARGETID_INDEX],
+                "data_release": row[HISTORY_DATA_RELEASE_INDEX],
+                "qa_flag": row[HISTORY_QA_FLAG_INDEX],
+            }
+            if review_mode:
+                payload.update(
+                    {
+                        "object_id": row[HISTORY_OBJECT_ID_INDEX],
+                        "notes": row[HISTORY_NOTES_INDEX] or "",
+                        "reviewer": row[HISTORY_REVIEWER_INDEX] or "",
+                        "reviewed_at": row[HISTORY_REVIEWED_AT_INDEX] or "",
+                    }
+                )
+            rows.append(payload)
+        return pd.DataFrame(rows)
 
     def change_template(self, template_name):
         """Change current template."""
@@ -1460,24 +1598,36 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
     def keyPressEvent(self, event):
         """Handle keyboard events."""
         spec = self.spec
+        review_mode = _is_aimsz_review_spec(spec)
 
         def _history_payload(class_vi, z_vi):
             targetid = getattr(spec, 'targetid', None)
             data_release = getattr(spec, 'data_release', None)
             qa_flag = getattr(spec, 'qa_flag', 0)
-            return [spec.objname, spec.ra, spec.dec, class_vi, z_vi, targetid, data_release, qa_flag]
+            payload = [spec.objname, spec.ra, spec.dec, class_vi, z_vi, targetid, data_release, qa_flag]
+            if review_mode:
+                payload.extend([
+                    getattr(spec, 'object_id', None),
+                    getattr(spec, 'notes', ''),
+                    '',
+                    '',
+                ])
+            return _ensure_history_row_shape(payload, review_mode=review_mode)
 
         if event.key() == Qt.Key_Q:
             if spec.objid not in self.history:
-                self.history[spec.objid] = _history_payload('QSO(Default)', spec.z_vi)
+                self.history[spec.objid] = _history_payload('QSO_DEFAULT' if review_mode else 'QSO(Default)', spec.z_vi)
             else:
                 # Update existing entry with current z_vi (preserves classification but updates redshift)
-                self.history[spec.objid][4] = spec.z_vi
-                if len(self.history[spec.objid]) < 8:
-                    self.history[spec.objid].extend([None] * (8 - len(self.history[spec.objid])))
-                self.history[spec.objid][5] = self.history[spec.objid][5] if self.history[spec.objid][5] is not None else getattr(spec, 'targetid', None)
-                self.history[spec.objid][6] = self.history[spec.objid][6] if self.history[spec.objid][6] is not None else getattr(spec, 'data_release', None)
-                self.history[spec.objid][7] = getattr(spec, 'qa_flag', 0)
+                row = _ensure_history_row_shape(self.history[spec.objid], review_mode=review_mode)
+                self.history[spec.objid] = row
+                row[4] = spec.z_vi
+                row[HISTORY_TARGETID_INDEX] = row[HISTORY_TARGETID_INDEX] if row[HISTORY_TARGETID_INDEX] is not None else getattr(spec, 'targetid', None)
+                row[HISTORY_DATA_RELEASE_INDEX] = row[HISTORY_DATA_RELEASE_INDEX] if row[HISTORY_DATA_RELEASE_INDEX] is not None else getattr(spec, 'data_release', None)
+                row[HISTORY_QA_FLAG_INDEX] = getattr(spec, 'qa_flag', 0)
+                if review_mode:
+                    row[HISTORY_OBJECT_ID_INDEX] = getattr(spec, 'object_id', row[HISTORY_OBJECT_ID_INDEX])
+                    row[HISTORY_NOTES_INDEX] = getattr(spec, 'notes', row[HISTORY_NOTES_INDEX] or '')
             if self.counter < self.len_list:
                 self.clear()
                 self.plot_next()
@@ -1487,27 +1637,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             if (self.counter-1) % 50 == 0:
                 print("Saving temp file to csv (n={})...".format(self.counter))
                 temp_filename = f"vi_temp_{self.counter-1}.csv"
-                rows = []
-                for objid_key, v in self.history.items():
-                    if len(v) < 5:
-                        continue
-                    targetid = v[5] if len(v) > 5 else None
-                    data_release = v[6] if len(v) > 6 else None
-                    qa_flag = v[7] if len(v) > 7 else 0
-                    rows.append(
-                        {
-                            "objid": objid_key,
-                            "objname": v[0],
-                            "ra": v[1],
-                            "dec": v[2],
-                            "class_vi": v[3],
-                            "z_vi": v[4],
-                            "targetid": targetid,
-                            "data_release": data_release,
-                            "qa_flag": qa_flag,
-                        }
-                    )
-                df_new = pd.DataFrame(rows)
+                df_new = self._history_rows_to_dataframe()
                 df_new.to_csv(temp_filename, index=False)
                 
         elif event.key() == Qt.Key_S:
@@ -1523,8 +1653,16 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             self.history[spec.objid] = _history_payload('QSO', spec.z_vi)
             self.update_spectrum_info_label()
         elif event.key() == Qt.Key_N:
-            print("\tClass: QSO(narrow).")
-            self.history[spec.objid] = _history_payload('QSO(narrow)', spec.z_vi)
+            print("\tClass: QSO(Narrow).")
+            self.history[spec.objid] = _history_payload('QSO_NARROW' if review_mode else 'QSO(Narrow)', spec.z_vi)
+            self.update_spectrum_info_label()
+        elif review_mode and event.key() == Qt.Key_B:
+            print("\tClass: QSO(BAL).")
+            self.history[spec.objid] = _history_payload('QSO_BAL', spec.z_vi)
+            self.update_spectrum_info_label()
+        elif review_mode and event.key() == Qt.Key_D:
+            print("\tClass: BAD.")
+            self.history[spec.objid] = _history_payload('BAD', np.nan)
             self.update_spectrum_info_label()
         elif event.key() == Qt.Key_U:
             print("\tClass: UNKNOWN.")
@@ -1532,7 +1670,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             self.update_spectrum_info_label()
         elif event.key() == Qt.Key_L:
             print("\tClass: LIKELY/Unusual QSO.")
-            self.history[spec.objid] = _history_payload('LIKELY', spec.z_vi)
+            self.history[spec.objid] = _history_payload('LIKELY_Q' if review_mode else 'LIKELY', spec.z_vi)
             self.update_spectrum_info_label()
         if event.key() == Qt.Key_R:
             self.clear()
@@ -1625,6 +1763,10 @@ class PGSpecPlotAppEnhanced(QApplication):
         except Exception:
             return 0
 
+    @staticmethod
+    def _is_review_mode_for_class(spec_class):
+        return "SpecAimszReview" in globals() and spec_class is SpecAimszReview
+
     def __init__(self, spectra, SpecClass=SpecEuclid1d,
                  output_file='vi_output.csv', z_max=5.0, load_history=False,
                  euclid_fits=None, cutout_buffer_dir=None, enable_image_panel=True,
@@ -1635,6 +1777,7 @@ class PGSpecPlotAppEnhanced(QApplication):
         self.output_file = output_file
         self.spectra = spectra
         self.SpecClass = SpecClass
+        self.review_mode = self._is_review_mode_for_class(SpecClass)
         self.euclid_fits = euclid_fits
         self.enable_image_panel = bool(enable_image_panel)
         self.enable_background_prefetch = bool(enable_background_prefetch) and self.enable_image_panel
@@ -1657,22 +1800,37 @@ class PGSpecPlotAppEnhanced(QApplication):
                     print("Added missing 'qa_flag' column to history file with default 0.")
                 except Exception as e:
                     print(f"Could not persist new 'qa_flag' column to history file: {e}")
+            if self.review_mode:
+                for column in ('object_id', 'notes', 'reviewer', 'reviewed_at'):
+                    if column not in df.columns:
+                        df[column] = "" if column != 'object_id' else np.nan
             history_dict = {}
             for _, row in df.iterrows():
                 objid = self._normalize_objid(row['objid'])
                 targetid = row['targetid'] if 'targetid' in df.columns else None
                 data_release = row['data_release'] if 'data_release' in df.columns else None
                 qa_flag = self._normalize_qa_flag(row['qa_flag']) if 'qa_flag' in df.columns else 0
-                history_dict[objid] = [
+                class_vi = row.get('class_vi', '')
+                if self.review_mode:
+                    class_vi = normalize_review_class_vi(class_vi)
+                payload = [
                     row.get('objname', 'Unknown'),
                     row.get('ra', np.nan),
                     row.get('dec', np.nan),
-                    row.get('class_vi', ''),
+                    class_vi,
                     row.get('z_vi', np.nan),
                     targetid,
                     data_release,
                     qa_flag,
                 ]
+                if self.review_mode:
+                    payload.extend([
+                        row.get('object_id', np.nan),
+                        row.get('notes', ''),
+                        row.get('reviewer', ''),
+                        row.get('reviewed_at', ''),
+                    ])
+                history_dict[objid] = _ensure_history_row_shape(payload, review_mode=self.review_mode)
             initial_counter = df.shape[0]
         else:
             history_dict = {}
@@ -1718,7 +1876,53 @@ class PGSpecPlotAppEnhanced(QApplication):
             self.start_background_prefetch()
         
         self.make_layout()
+        self.sync_review_fields_from_current_spec()
         self.aboutToQuit.connect(self.save_dict_todf)
+
+    def _default_class_value(self):
+        return "QSO_DEFAULT" if self.review_mode else "QSO(Default)"
+
+    def _ensure_history_entry(self, spec, *, class_vi=None, z_vi=None):
+        objid = getattr(spec, 'objid', None)
+        if objid is None:
+            return None
+        row = self.plot.history.get(objid)
+        if row is None:
+            row = [
+                getattr(spec, 'objname', 'Unknown'),
+                getattr(spec, 'ra', np.nan),
+                getattr(spec, 'dec', np.nan),
+                class_vi if class_vi is not None else self._default_class_value(),
+                getattr(spec, 'z_vi', 0.0) if z_vi is None else z_vi,
+                getattr(spec, 'targetid', None),
+                getattr(spec, 'data_release', None),
+                getattr(spec, 'qa_flag', 0),
+            ]
+            if self.review_mode:
+                row.extend([
+                    getattr(spec, 'object_id', None),
+                    getattr(spec, 'notes', ''),
+                    '',
+                    '',
+                ])
+            self.plot.history[objid] = _ensure_history_row_shape(row, review_mode=self.review_mode)
+            return self.plot.history[objid]
+        row = _ensure_history_row_shape(row, review_mode=self.review_mode)
+        self.plot.history[objid] = row
+        if class_vi is not None:
+            row[3] = class_vi
+        if z_vi is not None:
+            row[4] = z_vi
+        if row[HISTORY_TARGETID_INDEX] is None:
+            row[HISTORY_TARGETID_INDEX] = getattr(spec, 'targetid', None)
+        if row[HISTORY_DATA_RELEASE_INDEX] is None:
+            row[HISTORY_DATA_RELEASE_INDEX] = getattr(spec, 'data_release', None)
+        row[HISTORY_QA_FLAG_INDEX] = getattr(spec, 'qa_flag', 0)
+        if self.review_mode:
+            row[HISTORY_OBJECT_ID_INDEX] = getattr(spec, 'object_id', row[HISTORY_OBJECT_ID_INDEX])
+            if getattr(spec, 'notes', None) not in (None, ''):
+                row[HISTORY_NOTES_INDEX] = getattr(spec, 'notes')
+        return row
     
     def on_coordinate_changed(self, ra, dec):
         """Handle coordinate changes and pass object ID to cutout widget."""
@@ -1730,8 +1934,6 @@ class PGSpecPlotAppEnhanced(QApplication):
 
     def sync_qa_checkbox_from_current_spec(self):
         """Restore QA checkboxes from current spec/history."""
-        if self.cutout_widget is None:
-            return
         if not hasattr(self.plot, 'spec'):
             return
         spec = self.plot.spec
@@ -1742,7 +1944,37 @@ class PGSpecPlotAppEnhanced(QApplication):
         else:
             qa_flag = self._normalize_qa_flag(getattr(spec, 'qa_flag', 0))
         spec.qa_flag = qa_flag
-        self.cutout_widget.set_qa_flag(qa_flag)
+        if self.cutout_widget is not None:
+            self.cutout_widget.set_qa_flag(qa_flag)
+        self.sync_review_fields_from_current_spec()
+
+    def sync_review_fields_from_current_spec(self):
+        if not self.review_mode or not hasattr(self, 'review_notes_input'):
+            return
+        if not hasattr(self.plot, 'spec'):
+            return
+        spec = self.plot.spec
+        objid = getattr(spec, 'objid', None)
+        notes = ""
+        if objid in self.plot.history:
+            row = _ensure_history_row_shape(self.plot.history[objid], review_mode=True)
+            self.plot.history[objid] = row
+            notes = row[HISTORY_NOTES_INDEX] or ""
+        else:
+            notes = getattr(spec, 'notes', '') or ""
+        self.review_notes_input.blockSignals(True)
+        self.review_notes_input.setText(str(notes))
+        self.review_notes_input.blockSignals(False)
+
+    def on_review_notes_changed(self):
+        if not self.review_mode or not hasattr(self.plot, 'spec'):
+            return
+        spec = self.plot.spec
+        notes = self.review_notes_input.text()
+        spec.notes = notes
+        row = self._ensure_history_entry(spec)
+        if row is not None:
+            row[HISTORY_NOTES_INDEX] = notes
 
     def on_qa_flag_changed(self, _state):
         """Persist QA flag from checkbox selections into current spec/history."""
@@ -1759,24 +1991,14 @@ class PGSpecPlotAppEnhanced(QApplication):
             return
 
         if objid not in self.plot.history:
-            targetid = getattr(spec, 'targetid', None)
-            data_release = getattr(spec, 'data_release', None)
-            self.plot.history[objid] = [
-                getattr(spec, 'objname', 'Unknown'),
-                getattr(spec, 'ra', np.nan),
-                getattr(spec, 'dec', np.nan),
-                'QSO(Default)',
-                getattr(spec, 'z_vi', 0.0),
-                targetid,
-                data_release,
-                qa_flag,
-            ]
+            row = self._ensure_history_entry(spec)
+            if row is not None:
+                row[HISTORY_QA_FLAG_INDEX] = qa_flag
             return
 
-        row = self.plot.history[objid]
-        if len(row) < 8:
-            row.extend([None] * (8 - len(row)))
-        row[7] = qa_flag
+        row = self._ensure_history_entry(spec)
+        if row is not None:
+            row[HISTORY_QA_FLAG_INDEX] = qa_flag
     
     def start_background_prefetch(self):
         """Start background prefetching of cutouts for upcoming spectra."""
@@ -1909,9 +2131,13 @@ class PGSpecPlotAppEnhanced(QApplication):
             # Instructions with comprehensive keyboard shortcuts
             instruction_text = (
                 "Navigation: 'Q' next spectrum, Left/Right arrows previous/next | "
-                "Classification: 'A' QSO(AGN), 'N' QSO(narrow), 'S' STAR, 'G' GALAXY, 'U' UNKNOWN, 'L' LIKELY | "
-                "Tools: 'Space' wavelength info, 'M' mouse position, 'R' reset zoom | "
-                "Advanced: Ctrl+R reload, Ctrl+Left first, Ctrl+Right last, Ctrl+B resume from history"
+                + (
+                    "Classification: 'A' QSO, 'N' QSO(Narrow), 'B' QSO(BAL), 'D' BAD, 'S' STAR, 'G' GALAXY, 'U' UNKNOWN, 'L' LIKELY_Q | "
+                    if self.review_mode
+                    else "Classification: 'A' QSO(AGN), 'N' QSO(Narrow), 'S' STAR, 'G' GALAXY, 'U' UNKNOWN, 'L' LIKELY | "
+                )
+                + "Tools: 'Space' wavelength info, 'M' mouse position, 'R' reset zoom | "
+                + "Advanced: Ctrl+R reload, Ctrl+Left first, Ctrl+Right last, Ctrl+B resume from history"
             )
             toplabel = layout.addLabel(instruction_text, row=1, col=0, colspan=2)
             toplabel.setFont(QFont("Arial", 13))
@@ -1931,6 +2157,17 @@ class PGSpecPlotAppEnhanced(QApplication):
             
             # Add spectrum info label above plot
             left_layout.addWidget(self.plot.spectrum_info_label)
+            if self.review_mode:
+                notes_row = QWidget()
+                notes_layout = QHBoxLayout()
+                notes_layout.setContentsMargins(0, 0, 0, 0)
+                notes_layout.addWidget(QLabel("Notes:"))
+                self.review_notes_input = QLineEdit()
+                self.review_notes_input.setPlaceholderText("Optional review notes")
+                self.review_notes_input.editingFinished.connect(self.on_review_notes_changed)
+                notes_layout.addWidget(self.review_notes_input)
+                notes_row.setLayout(notes_layout)
+                left_layout.addWidget(notes_row)
             left_layout.addWidget(self.plot)
             
             # Redshift slider
@@ -1967,6 +2204,7 @@ class PGSpecPlotAppEnhanced(QApplication):
         """Forward keyboard events to plot widget."""
         self.plot.keyPressEvent(event)
         self.sync_qa_checkbox_from_current_spec()
+        self.sync_review_fields_from_current_spec()
         self._update_go_to_controls()
         self.plot.setFocus()
 
@@ -1994,6 +2232,7 @@ class PGSpecPlotAppEnhanced(QApplication):
         index_one_based = int(self.goto_index_spin.value())
         self.plot.jump_to_spectrum(index_one_based)
         self.sync_qa_checkbox_from_current_spec()
+        self.sync_review_fields_from_current_spec()
         self._update_go_to_controls()
         self.plot.setFocus()
 
@@ -2112,32 +2351,40 @@ class PGSpecPlotAppEnhanced(QApplication):
 
     def save_dict_todf(self):
         """Save classification results to CSV."""
-        if not self.plot.history:
+        df_new = self._history_rows_to_dataframe()
+        if df_new.empty:
             return
-
-        rows = []
-        for objid_key, v in self.plot.history.items():
-            if len(v) < 5:
-                continue
-            targetid = v[5] if len(v) > 5 else None
-            data_release = v[6] if len(v) > 6 else None
-            qa_flag = self._normalize_qa_flag(v[7]) if len(v) > 7 else 0
-            rows.append(
-                {
-                    "objid": objid_key,
-                    "objname": v[0],
-                    "ra": v[1],
-                    "dec": v[2],
-                    "class_vi": v[3],
-                    "z_vi": v[4],
-                    "targetid": targetid,
-                    "data_release": data_release,
-                    "qa_flag": qa_flag,
-                }
-            )
-        df_new = pd.DataFrame(rows)
         df_new.to_csv(self.output_file, index=False)
         print(f"Results saved to {self.output_file}")
+
+    def _history_rows_to_dataframe(self):
+        rows = []
+        for objid_key, raw in self.plot.history.items():
+            if len(raw) < 5:
+                continue
+            row = _ensure_history_row_shape(raw, review_mode=self.review_mode)
+            payload = {
+                "objid": objid_key,
+                "objname": row[0],
+                "ra": row[1],
+                "dec": row[2],
+                "class_vi": row[3],
+                "z_vi": row[4],
+                "targetid": row[HISTORY_TARGETID_INDEX],
+                "data_release": row[HISTORY_DATA_RELEASE_INDEX],
+                "qa_flag": self._normalize_qa_flag(row[HISTORY_QA_FLAG_INDEX]),
+            }
+            if self.review_mode:
+                payload.update(
+                    {
+                        "object_id": row[HISTORY_OBJECT_ID_INDEX],
+                        "notes": row[HISTORY_NOTES_INDEX] or "",
+                        "reviewer": row[HISTORY_REVIEWER_INDEX] or "",
+                        "reviewed_at": row[HISTORY_REVIEWED_AT_INDEX] or "",
+                    }
+                )
+            rows.append(payload)
+        return pd.DataFrame(rows)
 
 
 class PGSpecPlotThreadEnhanced(QThread):
