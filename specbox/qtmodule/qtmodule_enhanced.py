@@ -324,6 +324,9 @@ class AIMSZReviewPanel(QWidget):
         self.notes_label.setVisible(False)
         self.notes_edit.setVisible(False)
 
+    def set_default_reviewer(self, reviewer):
+        self._default_reviewer = str(reviewer or "")
+
     @staticmethod
     def _qa_flag_from_bits(contamination, unusable):
         flag = 0
@@ -935,6 +938,12 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
     def _default_class_token(self):
         return "QSO_DEFAULT" if self._is_aimsz_review else "QSO(Default)"
 
+    def _reviewer_default(self):
+        reviewer = getattr(self, "_session_reviewer", None)
+        if reviewer in (None, ""):
+            reviewer = default_reviewer_username()
+        return str(reviewer or "")
+
     def _new_history_record(self, spec, class_vi="", z_vi=None):
         return {
             "objname": getattr(spec, "objname", "Unknown"),
@@ -946,7 +955,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             "data_release": normalize_data_release(getattr(spec, "data_release", None), aimsz_review=self._is_aimsz_review),
             "qa_flag": int(getattr(spec, "qa_flag", 0) or 0),
             "notes": str(getattr(spec, "notes", "") or ""),
-            "reviewer": str(getattr(spec, "reviewer", "") or default_reviewer_username()),
+            "reviewer": str(getattr(spec, "reviewer", "") or self._reviewer_default()),
             "reviewed_at": str(getattr(spec, "reviewed_at", "") or ""),
             "object_id": getattr(spec, "object_id", None),
         }
@@ -974,7 +983,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             coerced["class_vi"] = normalize_class_label(coerced.get("class_vi", ""))
         coerced["qa_flag"] = int(coerced.get("qa_flag", 0) or 0)
         coerced["notes"] = str(coerced.get("notes", "") or "")
-        coerced["reviewer"] = str(coerced.get("reviewer", "") or default_reviewer_username())
+        coerced["reviewer"] = str(coerced.get("reviewer", "") or self._reviewer_default())
         coerced["reviewed_at"] = str(coerced.get("reviewed_at", "") or "")
         if coerced.get("targetid", None) is None:
             coerced["targetid"] = getattr(spec, "targetid", None)
@@ -1019,7 +1028,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         spec.class_vi = record.get("class_vi", getattr(spec, "class_vi", ""))
         if self._is_aimsz_review:
             spec.notes = record.get("notes", "")
-            spec.reviewer = record.get("reviewer", default_reviewer_username())
+            spec.reviewer = record.get("reviewer", self._reviewer_default())
             spec.reviewed_at = record.get("reviewed_at", "")
         return record
 
@@ -1028,6 +1037,9 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         record["class_vi"] = normalize_class_label(class_vi) if self._is_aimsz_review else class_vi
         record["z_vi"] = getattr(spec, "z_vi", 0.0) if z_vi is None else z_vi
         record["qa_flag"] = int(getattr(spec, "qa_flag", 0) or 0)
+        if self._is_aimsz_review:
+            record["reviewer"] = str(getattr(spec, "reviewer", record.get("reviewer", "")) or self._reviewer_default())
+            spec.reviewer = record["reviewer"]
         record["targetid"] = record.get("targetid", getattr(spec, "targetid", None))
         record["data_release"] = normalize_data_release(
             record.get("data_release", getattr(spec, "data_release", None)),
@@ -1057,7 +1069,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                         "z_vi": record.get("z_vi"),
                         "qa_flag": int(record.get("qa_flag", 0) or 0),
                         "notes": record.get("notes", ""),
-                        "reviewer": record.get("reviewer", ""),
+                        "reviewer": record.get("reviewer", "") or self._reviewer_default(),
                         "reviewed_at": record.get("reviewed_at", ""),
                     }
                 )
@@ -1161,9 +1173,9 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             if not hasattr(spec, 'notes'):
                 spec.notes = ""
             if not hasattr(spec, 'reviewer'):
-                spec.reviewer = default_reviewer_username()
+                spec.reviewer = self._reviewer_default()
             elif not getattr(spec, 'reviewer', ""):
-                spec.reviewer = default_reviewer_username()
+                spec.reviewer = self._reviewer_default()
             if not hasattr(spec, 'reviewed_at'):
                 spec.reviewed_at = ""
 
@@ -2068,6 +2080,7 @@ class PGSpecPlotAppEnhanced(QApplication):
         self.spectra = spectra
         self.SpecClass = SpecClass
         self._is_aimsz_review = self._is_aimsz_review_class(self.SpecClass)
+        self._session_reviewer = default_reviewer_username()
         self.euclid_fits = euclid_fits
         self.enable_image_panel = bool(enable_image_panel)
         self.enable_background_prefetch = bool(enable_background_prefetch) and self.enable_image_panel
@@ -2091,10 +2104,13 @@ class PGSpecPlotAppEnhanced(QApplication):
                 )
                 if objid is None:
                     continue
-                history_dict[objid] = self._row_to_history_record(
+                record = self._row_to_history_record(
                     row,
                     is_aimsz_review=self._is_aimsz_review,
                 )
+                history_dict[objid] = record
+                if self._is_aimsz_review and record.get("reviewer"):
+                    self._session_reviewer = str(record.get("reviewer"))
             initial_counter = df.shape[0]
         else:
             history_dict = {}
@@ -2111,6 +2127,7 @@ class PGSpecPlotAppEnhanced(QApplication):
             ext=self.dual_ext,
             extname=self.dual_extname,
             dual_good_pixels_only=self.dual_good_pixels_only)
+        self.plot._session_reviewer = self._session_reviewer
         self.len_list = self.plot.len_list
         self.plot.current_spec_changed.connect(self.on_current_spec_changed)
         self.plot.record_committed.connect(self.on_record_committed)
@@ -2120,7 +2137,7 @@ class PGSpecPlotAppEnhanced(QApplication):
         self.cutout_widget = None
         self.review_panel = None
         if self._is_aimsz_review:
-            self.review_panel = AIMSZReviewPanel(default_reviewer=default_reviewer_username())
+            self.review_panel = AIMSZReviewPanel(default_reviewer=self._session_reviewer)
             self.review_panel.qa_flag_changed.connect(self.on_review_panel_qa_changed)
             self.review_panel.notes_changed.connect(self.on_review_notes_changed)
             self.review_panel.reviewer_changed.connect(self.on_review_reviewer_changed)
@@ -2163,6 +2180,10 @@ class PGSpecPlotAppEnhanced(QApplication):
         self.sync_qa_checkbox_from_current_spec()
 
     def on_current_spec_changed(self):
+        if self._is_aimsz_review and hasattr(self.plot, "spec"):
+            spec = self.plot.spec
+            if not getattr(spec, "reviewer", ""):
+                spec.reviewer = self._session_reviewer
         self.sync_qa_checkbox_from_current_spec()
         self._update_go_to_controls()
 
@@ -2185,7 +2206,14 @@ class PGSpecPlotAppEnhanced(QApplication):
         record["z_vi"] = getattr(spec, "z_vi", record.get("z_vi", 0.0))
         record["qa_flag"] = int(getattr(spec, "qa_flag", record.get("qa_flag", 0)) or 0)
         record["notes"] = str(getattr(spec, "notes", record.get("notes", "")) or "")
-        record["reviewer"] = str(getattr(spec, "reviewer", record.get("reviewer", "")) or "")
+        record["reviewer"] = str(
+            getattr(spec, "reviewer", record.get("reviewer", "")) or self._session_reviewer
+        )
+        self._session_reviewer = record["reviewer"]
+        self.plot._session_reviewer = self._session_reviewer
+        if self.review_panel is not None:
+            self.review_panel.set_default_reviewer(self._session_reviewer)
+        spec.reviewer = record["reviewer"]
         if not record.get("class_vi"):
             record["class_vi"] = self.plot._default_class_token()
         if update_timestamp:
@@ -2291,9 +2319,14 @@ class PGSpecPlotAppEnhanced(QApplication):
         if not hasattr(self.plot, "spec"):
             return
         spec = self.plot.spec
-        spec.reviewer = text
+        reviewer = str(text or "").strip() or self._session_reviewer
+        spec.reviewer = reviewer
+        self._session_reviewer = reviewer
+        self.plot._session_reviewer = self._session_reviewer
+        if self.review_panel is not None:
+            self.review_panel.set_default_reviewer(self._session_reviewer)
         record = self.plot._history_record(spec=spec, create=True)
-        record["reviewer"] = text
+        record["reviewer"] = reviewer
         if not record.get("class_vi"):
             record["class_vi"] = self.plot._default_class_token()
         self.plot.history[spec.objid] = record
