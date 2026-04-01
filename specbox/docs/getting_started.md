@@ -80,6 +80,16 @@ Notes:
 - History is auto-loaded when that CSV already exists.
 - Add `--no-images` to disable the image panel and all cutout downloading.
 
+For AIMS-z review bundles:
+
+```bash
+specbox-viewer --spectra review_bundle_specbox.parquet --spec-class aimsz-review --no-images
+```
+
+Notes:
+- `aimsz-review` reads parquet rows directly using `wavelength`, `flux`, `ivar`, and `mask`.
+- Session CSVs use canonical string IDs like `aimsz:{object_id}` to make history loading stable.
+
 ### Euclid coadd (BGS+RGS)
 
 ```bash

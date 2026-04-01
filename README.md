@@ -75,7 +75,7 @@ python -m pip install .
 ## Usage
 ### Command-line tools
 
-`specbox` installs three CLIs:
+`specbox` installs four CLIs:
 
 - `specbox-viewer`: launch the enhanced viewer
 - `specbox-coadd`: coadd Euclid BGS+RGS chunks
@@ -88,6 +88,9 @@ specbox-viewer --spectra your_spectra.fits --spec-class euclid
 
 # Viewer without image panel or cutout downloads
 specbox-viewer --spectra your_spectra.fits --spec-class euclid --no-images
+
+# AIMS-z review parquet
+specbox-viewer --spectra review_bundle_specbox.parquet --spec-class aimsz-review --no-images
 
 # Coadd paired Euclid arms (default: EXTNAME intersection)
 specbox-coadd --rgs-file rgs_chunk.fits --bgs-file bgs_chunk.fits --output-prefix coadd/out_chunk_001
@@ -110,6 +113,7 @@ The main classes and functions of specbox are:
 #### `basemodule.py`:
 - `SpecLAMOST` and `SpecSDSS`: classes to read and manipulate spectra from the LAMOST and SDSS surveys, respectively.
 - `SpecIRAF`: class to read and manipulate spectra from the IRAF format.
+- `SpecAIMSZReview`: parquet reader for AIMS-z review bundles with canonical string `objid` keys (`aimsz:{object_id}`).
 - `SpecEuclid1d`: reader for Euclid combined 1D spectra, with `MASK`/`good_mask` support and optional `good_pixels_only=True`.
 - `SpecEuclid1dDual`: paired Euclid reader for BGS+RGS with overlap scaling and merged/coadd-ready outputs.
 - `SpecEuclidCoaddRow`: reader for dataframe/parquet rows containing coadded spectra arrays.

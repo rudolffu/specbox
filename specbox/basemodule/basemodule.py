@@ -594,6 +594,104 @@ class SpecSparcl(SpecPandasRow):
             self.objid = getattr(self, "sparcl_id", getattr(self, "specid", getattr(self, "_row", 0)))
 
 
+class SpecAIMSZReview(SpecPandasRow):
+    """Reader for AIMS-z review parquet spectra.
+
+    Expected row schema:
+    - arrays: ``wavelength``, ``flux``, ``ivar``, ``mask``
+    - scalars: ``object_id``, ``targetid``, ``ra``, ``dec``, ``redshift``,
+      ``spectype``, ``data_release``
+    - optional review context columns used by the viewer UI
+    """
+
+    REVIEW_CONTEXT_COLUMNS = (
+        "review_priority_tier",
+        "review_score",
+        "review_rank_within_tier",
+        "review_slice_label",
+        "z_ref",
+        "z_ml_expect",
+        "z_pcf_best",
+        "pcf_template_best",
+        "pcf_score_best",
+    )
+
+    def __init__(
+        self,
+        filename: Optional[Union[str, Path]] = None,
+        *args,
+        df: Optional[pd.DataFrame] = None,
+        ext: int = 1,
+        row: Optional[int] = None,
+        file_format: Optional[str] = None,
+        pandas_read_kwargs: Optional[Mapping[str, Any]] = None,
+        wave_unit: Optional[u.Unit] = u.Angstrom,
+        flux_unit: Optional[u.Unit] = 1e-17 * u.erg / u.s / u.cm**2 / u.Angstrom,
+        **kwargs,
+    ):
+        super().__init__(
+            filename=filename,
+            df=df,
+            ext=ext,
+            row=row,
+            file_format=file_format,
+            pandas_read_kwargs=pandas_read_kwargs,
+            wave_col="wavelength",
+            flux_col="flux",
+            ivar_col="ivar",
+            err_col=None,
+            wave_unit=wave_unit,
+            flux_unit=flux_unit,
+            meta_cols=(
+                "object_id",
+                "targetid",
+                "ra",
+                "dec",
+                "redshift",
+                "spectype",
+                "data_release",
+                *self.REVIEW_CONTEXT_COLUMNS,
+            ),
+            array_cols={"mask": "mask"},
+            *args,
+            **kwargs,
+        )
+
+        self.object_id = self._coerce_id_value(getattr(self, "object_id", None))
+        self.targetid = self._coerce_id_value(getattr(self, "targetid", None))
+        self.objid = self._canonical_objid(self.object_id)
+        self.objname = str(self.objid)
+        self.review_source = "aimsz-review"
+
+    @staticmethod
+    def _coerce_id_value(value):
+        if value is None:
+            return None
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            pass
+        if isinstance(value, (np.integer, int)):
+            return int(value)
+        if isinstance(value, (np.floating, float)) and np.isfinite(value) and float(value).is_integer():
+            return int(value)
+        text = str(value).strip()
+        if not text or text.lower() == "nan":
+            return None
+        try:
+            return int(text)
+        except Exception:
+            return text
+
+    @classmethod
+    def _canonical_objid(cls, object_id):
+        value = cls._coerce_id_value(object_id)
+        if value is None:
+            return "aimsz:unknown"
+        return f"aimsz:{value}"
+
+
 class SpecEuclidCoaddRow(SpecPandasRow):
     """Reader for Euclid BGS+RGS coadd spectra stored in dataframe files.
 

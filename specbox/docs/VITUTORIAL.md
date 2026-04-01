@@ -171,6 +171,28 @@ Notes:
 - The results CSV includes `targetid` and `data_release` when present in the input table.
 - Use the `Save PNG` button to save a screenshot to `./saved_pngs/`.
 
+### AIMS-z review parquet workflow
+
+Use `SpecAIMSZReview` for AIMS-z review bundles that include review metadata alongside the spectra:
+
+```python
+from specbox.basemodule import SpecAIMSZReview
+
+sp1 = SpecAIMSZReview('review_bundle_specbox.parquet', ext=1)
+sp1.plot()
+```
+
+To launch the reviewer UI directly:
+
+```bash
+specbox-viewer --spectra review_bundle_specbox.parquet --spec-class aimsz-review --no-images
+```
+
+Notes:
+- `aimsz-review` uses canonical string history keys: `aimsz:{object_id}`.
+- Saved session CSV columns are: `objid,targetid,ra,dec,data_release,class_vi,z_vi,qa_flag,notes,reviewer,reviewed_at`.
+- Legacy labels such as `QSO(Default)` and `LIKELY` are normalized on load; saved output always uses canonical uppercase tokens.
+
 ### Running the Visual Inspection Tool
 
 Use the CLI:
