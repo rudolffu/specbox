@@ -109,6 +109,11 @@ def viewer_cli() -> None:
         action="store_true",
         help="Disable the image panel and all cutout downloading.",
     )
+    parser.add_argument(
+        "--images",
+        action="store_true",
+        help="Enable the image panel and cutout downloads for modes where images are default-off.",
+    )
     parser.add_argument("--disable-background-prefetch", action="store_true")
     parser.add_argument("--rgs-file", default=None, help="Dual-arm mode: RGS FITS file.")
     parser.add_argument("--bgs-file", default=None, help="Dual-arm mode: BGS FITS file.")
@@ -116,6 +121,8 @@ def viewer_cli() -> None:
     parser.add_argument("--extname", default=None, help="Dual-arm shared extension name.")
     parser.add_argument("--dual-good-pixels-only", action="store_true")
     args = parser.parse_args()
+    if args.images and args.no_images:
+        parser.error("Use either --images or --no-images, not both.")
 
     from .qtmodule import PGSpecPlotThreadEnhanced
 
@@ -134,6 +141,10 @@ def viewer_cli() -> None:
     should_load_history = args.load_history
     if should_load_history is None:
         should_load_history = os.path.exists(output_file)
+    if args.spec_class == "aimsz-review":
+        enable_image_panel = bool(args.images)
+    else:
+        enable_image_panel = not args.no_images
 
     viewer = PGSpecPlotThreadEnhanced(
         spectra=spectra,
@@ -143,7 +154,7 @@ def viewer_cli() -> None:
         load_history=should_load_history,
         euclid_fits=args.euclid_fits,
         cutout_buffer_dir=args.cutout_buffer_dir,
-        enable_image_panel=not args.no_images,
+        enable_image_panel=enable_image_panel,
         enable_background_prefetch=not args.disable_background_prefetch,
         rgs_file=args.rgs_file,
         bgs_file=args.bgs_file,

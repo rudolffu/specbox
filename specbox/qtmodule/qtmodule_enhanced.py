@@ -51,7 +51,8 @@ from ..auxmodule.cutout_download import (
 data_path = Path(files("specbox").joinpath("data/templates"))
 fits_file = data_path / "qso1" / "optical_nir_qso_template_v1.fits"
 ragn_dr1_template_file = data_path / "qso1" / "ragn_dr1.fits"
-type2_template_file = data_path / "qso2" / "ragn_na.fits"
+type2_template_file = data_path / "qso2" / "type2_quasar_composite.csv"
+type2_euclid_template_file = data_path / "qso2" / "ragn_na.fits"
 tb_temp = Table.read(str(fits_file))
 tb_temp.rename_columns(['wavelength', 'flux'], ['Wave', 'Flux'])
 try:
@@ -86,6 +87,7 @@ _CANONICAL_CLASS_TO_DISPLAY = {
     "QSO": "QSO",
     "QSO_NARROW": "QSO(Narrow)",
     "QSO_BAL": "QSO(BAL)",
+    "QSO_FELOBAL": "QSO(FeLoBAL)",
     "LIKELY_Q": "LIKELY_Q",
     "GALAXY": "GALAXY",
     "STAR": "STAR",
@@ -101,6 +103,8 @@ _CLASS_LABEL_ALIASES = {
     "QSO_NARROW": "QSO_NARROW",
     "QSO(BAL)": "QSO_BAL",
     "QSO_BAL": "QSO_BAL",
+    "QSO(FeLoBAL)": "QSO_FELOBAL",
+    "QSO_FELOBAL": "QSO_FELOBAL",
     "LIKELY": "LIKELY_Q",
     "LIKELY_Q": "LIKELY_Q",
     "GALAXY": "GALAXY",
@@ -141,6 +145,24 @@ def normalize_data_release(value, *, aimsz_review=False):
     if aimsz_review and "desi" in text.lower() and "dr1" in text.lower():
         return "DESI-DR1"
     return text
+
+
+def load_template_table(template_path):
+    template_path = Path(template_path)
+    suffix = template_path.suffix.lower()
+    if suffix == ".csv":
+        table = Table.read(str(template_path), format="ascii.csv")
+    else:
+        table = Table.read(str(template_path))
+    columns = {str(col).lower(): col for col in table.colnames}
+    wave_col = columns.get("wavelength", table.colnames[0] if len(table.colnames) > 0 else None)
+    flux_col = columns.get("flux", table.colnames[1] if len(table.colnames) > 1 else None)
+    if wave_col is None or flux_col is None:
+        raise ValueError(f"Template has unexpected columns: {template_path}")
+    return {
+        "wave": np.asarray(table[wave_col], dtype=float),
+        "flux": np.asarray(table[flux_col], dtype=float),
+    }
 
 
 class ImageCutoutWidget(QWidget):
@@ -745,43 +767,45 @@ class TemplateManager:
         self.templates["ragn_dr1"] = None
         try:
             if ragn_dr1_template_file.exists():
-                ragn_tb = Table.read(str(ragn_dr1_template_file))
-                ragn_cols = {str(c).lower(): c for c in ragn_tb.colnames}
-                wave_col = ragn_cols.get("wavelength", ragn_tb.colnames[0] if len(ragn_tb.colnames) > 0 else None)
-                flux_col = ragn_cols.get("flux", ragn_tb.colnames[1] if len(ragn_tb.colnames) > 1 else None)
-                if wave_col is not None and flux_col is not None:
-                    self.templates["ragn_dr1"] = {
-                        'wave': np.asarray(ragn_tb[wave_col], dtype=float),
-                        'flux': np.asarray(ragn_tb[flux_col], dtype=float),
-                        'description': 'ragn_dr1 AGN/QSO Template'
-                    }
-                else:
-                    print(f"ragn_dr1 template has unexpected columns: {ragn_dr1_template_file}")
+                ragn_template = load_template_table(ragn_dr1_template_file)
+                self.templates["ragn_dr1"] = {
+                    'wave': ragn_template['wave'],
+                    'flux': ragn_template['flux'],
+                    'description': 'ragn_dr1 AGN/QSO Template'
+                }
             else:
                 print(f"ragn_dr1 template file not found: {ragn_dr1_template_file}")
         except Exception as e:
             print(f"Failed to load ragn_dr1 template from {ragn_dr1_template_file}: {e}")
 
-        # Load Type 2 template from packaged FITS file when available.
+        # Load Type 2 template from packaged CSV file when available.
         self.templates["Type 2"] = None
         try:
             if type2_template_file.exists():
-                type2_tb = Table.read(str(type2_template_file))
-                type2_cols = {str(c).lower(): c for c in type2_tb.colnames}
-                wave_col = type2_cols.get("wavelength", type2_tb.colnames[0] if len(type2_tb.colnames) > 0 else None)
-                flux_col = type2_cols.get("flux", type2_tb.colnames[1] if len(type2_tb.colnames) > 1 else None)
-                if wave_col is not None and flux_col is not None:
-                    self.templates["Type 2"] = {
-                        'wave': np.asarray(type2_tb[wave_col], dtype=float),
-                        'flux': np.asarray(type2_tb[flux_col], dtype=float),
-                        'description': 'Type 2 AGN/QSO Template (ragn_na)'
-                    }
-                else:
-                    print(f"Type 2 template has unexpected format: {type2_template_file}")
+                type2_template = load_template_table(type2_template_file)
+                self.templates["Type 2"] = {
+                    'wave': type2_template['wave'],
+                    'flux': type2_template['flux'],
+                    'description': 'Type 2 AGN/QSO Template'
+                }
             else:
                 print(f"Type 2 template file not found: {type2_template_file}")
         except Exception as e:
             print(f"Failed to load Type 2 template from {type2_template_file}: {e}")
+
+        self.templates["type2_euclid"] = None
+        try:
+            if type2_euclid_template_file.exists():
+                type2_euclid_template = load_template_table(type2_euclid_template_file)
+                self.templates["type2_euclid"] = {
+                    'wave': type2_euclid_template['wave'],
+                    'flux': type2_euclid_template['flux'],
+                    'description': 'Type 2 Euclid AGN/QSO Template (ragn_na)'
+                }
+            else:
+                print(f"type2_euclid template file not found: {type2_euclid_template_file}")
+        except Exception as e:
+            print(f"Failed to load type2_euclid template from {type2_euclid_template_file}: {e}")
     
     def get_template(self, template_name):
         """Get template by name."""
@@ -829,6 +853,9 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self._observed_wmax = None
         self._annotation_wave = None
         self._annotation_flux = None
+        self._view_lock_active = False
+        self._locked_view_range = None
+        self._suspend_view_lock_updates = False
 
         # ``spectra`` can either be a FITS file containing multiple extensions
         # or a list of individual spectrum files.
@@ -875,6 +902,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self.enableAutoRange()
         self.vb = self.getViewBox()
         self.vb.setMouseMode(self.vb.RectMode)
+        self.vb.sigRangeChangedManually.connect(self._on_manual_range_changed)
         self.z_min = 0.0
         self.z_max = z_max
         self.base_z_step = 0.001
@@ -936,7 +964,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self.plot_next()
 
     def _default_class_token(self):
-        return "QSO_DEFAULT" if self._is_aimsz_review else "QSO(Default)"
+        return "QSO_DEFAULT"
 
     def _reviewer_default(self):
         reviewer = getattr(self, "_session_reviewer", None)
@@ -979,8 +1007,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                 "reviewed_at": values[10] if len(values) > 10 else "",
                 "object_id": getattr(spec, "object_id", None),
             }
-        if self._is_aimsz_review:
-            coerced["class_vi"] = normalize_class_label(coerced.get("class_vi", ""))
+        coerced["class_vi"] = normalize_class_label(coerced.get("class_vi", ""))
         coerced["qa_flag"] = int(coerced.get("qa_flag", 0) or 0)
         coerced["notes"] = str(coerced.get("notes", "") or "")
         coerced["reviewer"] = str(coerced.get("reviewer", "") or self._reviewer_default())
@@ -1034,7 +1061,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
 
     def _set_classification(self, spec, class_vi, z_vi=None):
         record = self._history_record(spec=spec, create=True)
-        record["class_vi"] = normalize_class_label(class_vi) if self._is_aimsz_review else class_vi
+        record["class_vi"] = normalize_class_label(class_vi)
         record["z_vi"] = getattr(spec, "z_vi", 0.0) if z_vi is None else z_vi
         record["qa_flag"] = int(getattr(spec, "qa_flag", 0) or 0)
         if self._is_aimsz_review:
@@ -1080,7 +1107,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                         "objname": record.get("objname", "Unknown"),
                         "ra": record.get("ra"),
                         "dec": record.get("dec"),
-                        "class_vi": record.get("class_vi", ""),
+                        "class_vi": normalize_class_label(record.get("class_vi", "")),
                         "z_vi": record.get("z_vi"),
                         "targetid": record.get("targetid"),
                         "data_release": record.get("data_release"),
@@ -1191,6 +1218,55 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self.redshiftSpin.setValue(initial_z)
         self.redshiftSpin.blockSignals(False)
 
+    def _on_manual_range_changed(self, *_args):
+        if self._suspend_view_lock_updates:
+            return
+        self._capture_current_view_range()
+
+    def _capture_current_view_range(self):
+        try:
+            x_range, y_range = self.vb.viewRange()
+        except Exception:
+            return
+        if x_range is None or y_range is None:
+            return
+        if len(x_range) != 2 or len(y_range) != 2:
+            return
+        values = [x_range[0], x_range[1], y_range[0], y_range[1]]
+        if not all(np.isfinite(values)):
+            return
+        self._locked_view_range = (
+            (float(x_range[0]), float(x_range[1])),
+            (float(y_range[0]), float(y_range[1])),
+        )
+        self._view_lock_active = True
+
+    def _clear_view_lock(self):
+        self._view_lock_active = False
+        self._locked_view_range = None
+
+    def _restore_locked_view(self):
+        if not self._view_lock_active or self._locked_view_range is None:
+            return False
+        try:
+            x_range, y_range = self._locked_view_range
+            if not all(np.isfinite([x_range[0], x_range[1], y_range[0], y_range[1]])):
+                return False
+            self._suspend_view_lock_updates = True
+            self.enableAutoRange(axis='x', enable=False)
+            self.enableAutoRange(axis='y', enable=False)
+            self.vb.setRange(
+                xRange=(float(x_range[0]), float(x_range[1])),
+                yRange=(float(y_range[0]), float(y_range[1])),
+                padding=0.0,
+                disableAutoRange=True,
+            )
+            return True
+        except Exception:
+            return False
+        finally:
+            self._suspend_view_lock_updates = False
+
     def slider_changed(self, slider_value):
         z = np.exp(self.base_z_step * slider_value) * (1+self.z_min) - 1
         self.spec.z_vi = z
@@ -1198,7 +1274,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self.redshiftSpin.setValue(z)
         self.redshiftSpin.blockSignals(False)
         self.clear()
-        self.plot_single()
+        self.plot_single(preserve_view=self._view_lock_active)
 
     def spin_changed(self, z_value):
         self.spec.z_vi = z_value
@@ -1207,9 +1283,9 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self.slider.setValue(slider_value)
         self.slider.blockSignals(False)
         self.clear()
-        self.plot_single()
+        self.plot_single(preserve_view=self._view_lock_active)
 
-    def plot_single(self):
+    def plot_single(self, preserve_view=False):
         """Plot the spectrum without template."""
         spec = self.spec
         dual = self.spec_dual
@@ -1467,32 +1543,45 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
 
         # Update info label above plot
         self.update_spectrum_info_label()
-        
-        # Keep x-limits fixed to the clipped observed wavelength span.
-        if self._observed_wmin is not None and self._observed_wmax is not None:
-            self.setXRange(float(self._observed_wmin), float(self._observed_wmax), padding=0.0)
-        # Only override y-range for spectra that are entirely zero-valued.
-        flux_arr = self._annotation_flux if self._annotation_flux is not None else getattr(self, 'flux', None)
-        fixed_zero_ylim = None
-        if flux_arr is not None:
-            flux_arr = np.asarray(flux_arr, dtype=float)
-            finite_flux = flux_arr[np.isfinite(flux_arr)]
-            if finite_flux.size > 0 and np.allclose(finite_flux, 0.0, rtol=0.0, atol=0.0):
-                ylim = 1e-16 if getattr(spec, 'flux_unit', None) is not None else 1.0
-                fixed_zero_ylim = (-ylim, ylim)
-        if fixed_zero_ylim is not None:
-            self.enableAutoRange(axis='y', enable=False)
-            self.setYRange(float(fixed_zero_ylim[0]), float(fixed_zero_ylim[1]), padding=0.0)
-        elif is_sparcl:
-            self.enableAutoRange(axis='y', enable=False)
-            y1, y2 = np.percentile(flux_sm[np.isfinite(flux_sm)], [0.01, 99.99])
-            ymin = y1 - 0.1 * (y2 - y1)
-            ymax = y2 + 0.1 * (y2 - y1)
-            self.setYRange(ymin, ymax, padding=0.05)
-        else:
-            self.enableAutoRange(axis='y', enable=True)
+        self._apply_axes(preserve_view=preserve_view, is_sparcl=is_sparcl)
         
         # Coordinate signal emission is now handled in navigation methods
+
+    def _apply_axes(self, *, preserve_view=False, is_sparcl=False):
+        if preserve_view and self._restore_locked_view():
+            return
+
+        self._suspend_view_lock_updates = True
+        try:
+            if self._observed_wmin is not None and self._observed_wmax is not None:
+                self.enableAutoRange(axis='x', enable=False)
+                self.setXRange(float(self._observed_wmin), float(self._observed_wmax), padding=0.0)
+
+            flux_arr = self._annotation_flux if self._annotation_flux is not None else getattr(self, 'flux', None)
+            fixed_zero_ylim = None
+            if flux_arr is not None:
+                flux_arr = np.asarray(flux_arr, dtype=float)
+                finite_flux = flux_arr[np.isfinite(flux_arr)]
+                if finite_flux.size > 0 and np.allclose(finite_flux, 0.0, rtol=0.0, atol=0.0):
+                    ylim = 1e-16 if getattr(self.spec, 'flux_unit', None) is not None else 1.0
+                    fixed_zero_ylim = (-ylim, ylim)
+            if fixed_zero_ylim is not None:
+                self.enableAutoRange(axis='y', enable=False)
+                self.setYRange(float(fixed_zero_ylim[0]), float(fixed_zero_ylim[1]), padding=0.0)
+            elif is_sparcl and hasattr(self, 'flux_sm') and self.flux_sm is not None:
+                finite_sm = self.flux_sm[np.isfinite(self.flux_sm)]
+                if finite_sm.size > 0:
+                    self.enableAutoRange(axis='y', enable=False)
+                    y1, y2 = np.percentile(finite_sm, [0.01, 99.99])
+                    ymin = y1 - 0.1 * (y2 - y1)
+                    ymax = y2 + 0.1 * (y2 - y1)
+                    self.setYRange(ymin, ymax, padding=0.05)
+                else:
+                    self.enableAutoRange(axis='y', enable=True)
+            else:
+                self.enableAutoRange(axis='y', enable=True)
+        finally:
+            self._suspend_view_lock_updates = False
 
     def update_spectrum_info_label(self):
         """Update the spectrum info label above the plot."""
@@ -1714,6 +1803,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             print("No more spectra to plot.")
             return
         self.clear()
+        self._clear_view_lock()
         while self.counter < self.len_list:
             try:
                 spec = self._load_current_spec(self.counter)
@@ -1749,6 +1839,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         """Plot previous spectrum."""
         if self.counter > 1:
             self.clear()
+            self._clear_view_lock()
             loaded = False
             target = self.counter - 2
             while target >= 0:
@@ -1796,6 +1887,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             return
 
         self.clear()
+        self._clear_view_lock()
         target_zero_based = index_one_based - 1
         try:
             spec = self._load_current_spec(target_zero_based)
@@ -1890,16 +1982,20 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             _commit_current('GALAXY', spec.z_vi)
             self.update_spectrum_info_label()
         elif event.key() == Qt.Key_A:
-            print("\tClass: QSO(AGN).")
+            print("\tClass: QSO.")
             _commit_current('QSO', spec.z_vi)
             self.update_spectrum_info_label()
         elif event.key() == Qt.Key_N:
-            print("\tClass: QSO(narrow).")
-            _commit_current('QSO_NARROW' if self._is_aimsz_review else 'QSO(narrow)', spec.z_vi)
+            print("\tClass: QSO(Narrow).")
+            _commit_current('QSO_NARROW', spec.z_vi)
             self.update_spectrum_info_label()
         elif event.key() == Qt.Key_B:
             print("\tClass: QSO(BAL).")
-            _commit_current('QSO_BAL' if self._is_aimsz_review else 'QSO(BAL)', spec.z_vi)
+            _commit_current('QSO_BAL', spec.z_vi)
+            self.update_spectrum_info_label()
+        elif event.key() == Qt.Key_F:
+            print("\tClass: QSO(FeLoBAL).")
+            _commit_current('QSO_FELOBAL', spec.z_vi)
             self.update_spectrum_info_label()
         elif event.key() == Qt.Key_U:
             print("\tClass: UNKNOWN.")
@@ -1911,9 +2007,10 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             self.update_spectrum_info_label()
         elif event.key() == Qt.Key_L:
             print("\tClass: LIKELY/Unusual QSO.")
-            _commit_current('LIKELY_Q' if self._is_aimsz_review else 'LIKELY', spec.z_vi)
+            _commit_current('LIKELY_Q', spec.z_vi)
             self.update_spectrum_info_label()
-        if event.key() == Qt.Key_R:
+        if event.key() == Qt.Key_R and not (event.modifiers() & Qt.ControlModifier):
+            self._clear_view_lock()
             self.clear()
             self.plot_single()
         if event.modifiers() & Qt.ControlModifier:
@@ -1931,6 +2028,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         if event.modifiers() & Qt.ControlModifier:
             if event.key() == Qt.Key_R:
                 self.clear()
+                self._clear_view_lock()
                 # Reload current spectrum using original logic
                 try:
                     spec = self._load_current_spec(self.counter - 1)
@@ -2054,7 +2152,7 @@ class PGSpecPlotAppEnhanced(QApplication):
             "objname": row.get("objname", "Unknown"),
             "ra": row.get("ra", np.nan),
             "dec": row.get("dec", np.nan),
-            "class_vi": normalize_class_label(row.get("class_vi", "")) if is_aimsz_review else row.get("class_vi", ""),
+            "class_vi": normalize_class_label(row.get("class_vi", "")),
             "z_vi": row.get("z_vi", np.nan),
             "targetid": row.get("targetid", None),
             "data_release": normalize_data_release(row.get("data_release", None), aimsz_review=is_aimsz_review),
@@ -2071,8 +2169,8 @@ class PGSpecPlotAppEnhanced(QApplication):
 
     def __init__(self, spectra, SpecClass=SpecEuclid1d,
                  output_file='vi_output.csv', z_max=5.0, load_history=False,
-                 euclid_fits=None, cutout_buffer_dir=None, enable_image_panel=True,
-                 enable_background_prefetch=True,
+                 euclid_fits=None, cutout_buffer_dir=None, enable_image_panel=None,
+                 enable_background_prefetch=None,
                  rgs_file=None, bgs_file=None, ext=None, extname=None,
                  dual_good_pixels_only=False):
         super().__init__(sys.argv)
@@ -2082,7 +2180,11 @@ class PGSpecPlotAppEnhanced(QApplication):
         self._is_aimsz_review = self._is_aimsz_review_class(self.SpecClass)
         self._session_reviewer = default_reviewer_username()
         self.euclid_fits = euclid_fits
+        if enable_image_panel is None:
+            enable_image_panel = not self._is_aimsz_review
         self.enable_image_panel = bool(enable_image_panel)
+        if enable_background_prefetch is None:
+            enable_background_prefetch = self.enable_image_panel
         self.enable_background_prefetch = bool(enable_background_prefetch) and self.enable_image_panel
         self.rgs_file = rgs_file
         self.bgs_file = bgs_file
@@ -2463,15 +2565,15 @@ class PGSpecPlotAppEnhanced(QApplication):
             # Instructions with comprehensive keyboard shortcuts
             instruction_text = (
                 "Navigation: 'Q' next spectrum, Left/Right arrows previous/next | "
-                "Classification: 'A' QSO(AGN), 'N' QSO(Narrow), 'B' QSO(BAL), 'D' BAD spectrum, |"
+                "Classification: 'A' QSO, 'N' QSO(Narrow), 'B' QSO(BAL), 'F' QSO(FeLoBAL), 'D' BAD spectrum, | "
                 "'S' STAR, 'G' GALAXY, 'U' UNKNOWN, 'L' LIKELY_Q | "
                 "Tools: 'Space' wavelength info, 'M' mouse position, 'R' reset zoom | "
                 "Advanced: Ctrl+R reload, Ctrl+Left first, Ctrl+Right last, Ctrl+B resume from history"
             )
             toplabel = layout.addLabel(instruction_text, row=1, col=0, colspan=2)
-            toplabel.setFont(QFont("Arial", 13))
-            toplabel.setMinimumHeight(60)
-            toplabel.setMaximumHeight(80)
+            toplabel.setFont(QFont("Arial", 15))
+            toplabel.setMinimumHeight(72)
+            toplabel.setMaximumHeight(96)
             toplabel.setAlignment(Qt.AlignLeft | Qt.AlignTop)
             toplabel.setStyleSheet("background-color: white;color: black;")
             toplabel.setFrameStyle(QFrame.Panel | QFrame.Raised)
@@ -2511,7 +2613,9 @@ class PGSpecPlotAppEnhanced(QApplication):
                 right_layout.addStretch()
                 right_widget.setLayout(right_layout)
                 main_splitter.addWidget(right_widget)
-                main_splitter.setSizes([780, 320])
+                main_splitter.setSizes(self._default_splitter_sizes())
+                main_splitter.setStretchFactor(0, 5 if self._is_aimsz_review else 4)
+                main_splitter.setStretchFactor(1, 1)
                 main_splitter.setCollapsible(1, True)
             else:
                 main_splitter.setSizes([1000])
@@ -2526,6 +2630,19 @@ class PGSpecPlotAppEnhanced(QApplication):
             
         self.layout = layout
         self.layout.show()
+
+    def _default_splitter_sizes(self):
+        if self._is_aimsz_review:
+            if self.enable_image_panel and self.cutout_widget is not None:
+                return [900, 280]
+            return [980, 220]
+        if self.review_panel is not None and self.cutout_widget is not None:
+            return [780, 320]
+        if self.review_panel is not None:
+            return [860, 280]
+        if self.cutout_widget is not None:
+            return [800, 200]
+        return [1000]
 
     def keyPressEvent(self, event):
         """Forward keyboard events to plot widget."""
@@ -2656,17 +2773,15 @@ class PGSpecPlotAppEnhanced(QApplication):
         if not self.enable_image_panel or self.cutout_widget is None:
             return
         if self.image_toggle_btn.isChecked():
-            if self.review_panel is None:
+            if hasattr(self, "main_splitter"):
                 self.main_splitter.setSizes([1000, 0])
             self.cutout_widget.setVisible(False)
             self.image_toggle_btn.setText("Show Images")
             self.cutout_widget.auto_fetch_cb.setChecked(False)
         else:
             self.cutout_widget.setVisible(True)
-            if self.review_panel is None:
-                self.main_splitter.setSizes([800, 200])
-            else:
-                self.main_splitter.setSizes([780, 320])
+            if hasattr(self, "main_splitter"):
+                self.main_splitter.setSizes(self._default_splitter_sizes())
             self.image_toggle_btn.setText("Hide Images")
             self.cutout_widget.auto_fetch_cb.setChecked(True)
 
@@ -2709,6 +2824,9 @@ class PGSpecPlotThreadEnhanced(QThread):
     def __init__(self, spectra=None, SpecClass=SpecEuclid1d, specfile=None, **kwargs):
         super().__init__()
         explicit_buffer_dir = kwargs.pop("cutout_buffer_dir", None)
+        explicit_enable_image_panel = "enable_image_panel" in kwargs
+        if not explicit_enable_image_panel and issubclass(SpecClass, SpecAIMSZReview):
+            kwargs["enable_image_panel"] = False
         self.enable_image_panel = bool(kwargs.get("enable_image_panel", True))
         self.rgs_file = kwargs.get("rgs_file", None)
         self.bgs_file = kwargs.get("bgs_file", None)

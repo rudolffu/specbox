@@ -185,13 +185,14 @@ sp1.plot()
 To launch the reviewer UI directly:
 
 ```bash
-specbox-viewer --spectra review_bundle_specbox.parquet --spec-class aimsz-review --no-images
+specbox-viewer --spectra review_bundle_specbox.parquet --spec-class aimsz-review
 ```
 
 Notes:
 - `aimsz-review` uses canonical string history keys: `aimsz:{object_id}`.
 - Saved session CSV columns are: `objid,targetid,ra,dec,data_release,class_vi,z_vi,qa_flag,notes,reviewer,reviewed_at`.
 - Legacy labels such as `QSO(Default)` and `LIKELY` are normalized on load; saved output always uses canonical uppercase tokens.
+- `aimsz-review` disables images and cutout downloading by default; add `--images` to opt in.
 
 ### Running the Visual Inspection Tool
 
@@ -201,7 +202,7 @@ Use the CLI:
 specbox-viewer --spectra COMBINED_SPECS.fits --spec-class euclid
 ```
 
-Add `--no-images` to disable the image panel and skip all cutout downloads.
+Add `--no-images` to disable the image panel and skip all cutout downloads. For `aimsz-review`, this is already the default and `--images` enables the image panel.
 
 The first time you run the tool in a new Python environment, `matplotlib` will take some time to build the font cache. Subsequent runs will be faster.
 
@@ -248,7 +249,7 @@ This mapping allows the step size to increase with redshift, matching the natura
 When the tool is active, use the following keys:
 
 - **Q:**  
-  Loads the next spectrum. If only **Q** is pressed, the default classification **QSO(Default)** will be adopted. If the user chooses other classifications (keys below), using **Q** is also needed to load the next spectrum. 
+  Loads the next spectrum. If only **Q** is pressed, the default classification **QSO(Default)** will be adopted. If the user chooses other classifications (keys below), using **Q** is also needed to load the next spectrum. Saved history uses the canonical token `QSO_DEFAULT`.
   
 - **S:**  
   Classifies the spectrum as **STAR** (sets redshift to 0).
@@ -257,16 +258,22 @@ When the tool is active, use the following keys:
   Classifies the spectrum as **GALAXY**.
 
 - **A:**  
-  Classifies the spectrum as **QSO (AGN)**.
+  Classifies the spectrum as **QSO**.
 
 - **N:**  
-  Classifies the spectrum as **QSO (narrow)**.
+  Classifies the spectrum as **QSO(Narrow)**.
+
+- **B:**  
+  Classifies the spectrum as **QSO(BAL)**.
+
+- **F:**  
+  Classifies the spectrum as **QSO(FeLoBAL)**.
 
 - **U:**  
   Classifies the spectrum as **UNKNOWN**.
 
 - **L:**  
-  Classifies the spectrum as **LIKELY/Unusual QSO**.
+  Classifies the spectrum as **LIKELY_Q**.
 
 - **M:**  
   Prints the current mouse position in the plot (useful for measurements).

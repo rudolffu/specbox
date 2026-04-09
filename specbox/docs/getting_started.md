@@ -83,12 +83,13 @@ Notes:
 For AIMS-z review bundles:
 
 ```bash
-specbox-viewer --spectra review_bundle_specbox.parquet --spec-class aimsz-review --no-images
+specbox-viewer --spectra review_bundle_specbox.parquet --spec-class aimsz-review
 ```
 
 Notes:
 - `aimsz-review` reads parquet rows directly using `wavelength`, `flux`, `ivar`, and `mask`.
 - Session CSVs use canonical string IDs like `aimsz:{object_id}` to make history loading stable.
+- `aimsz-review` disables images and cutout downloading by default; add `--images` to opt in.
 
 ### Euclid coadd (BGS+RGS)
 

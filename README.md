@@ -89,8 +89,8 @@ specbox-viewer --spectra your_spectra.fits --spec-class euclid
 # Viewer without image panel or cutout downloads
 specbox-viewer --spectra your_spectra.fits --spec-class euclid --no-images
 
-# AIMS-z review parquet
-specbox-viewer --spectra review_bundle_specbox.parquet --spec-class aimsz-review --no-images
+# AIMS-z review parquet (images are disabled by default)
+specbox-viewer --spectra review_bundle_specbox.parquet --spec-class aimsz-review
 
 # Coadd paired Euclid arms (default: EXTNAME intersection)
 specbox-coadd --rgs-file rgs_chunk.fits --bgs-file bgs_chunk.fits --output-prefix coadd/out_chunk_001
@@ -159,7 +159,7 @@ specbox-viewer \
   --spec-class euclid-coadd
 ```
 
-Add `--no-images` when cutouts are unavailable or should be skipped entirely.
+Add `--no-images` when cutouts are unavailable or should be skipped entirely. For `aimsz-review`, images are off by default; use `--images` to opt in.
 
 #### Run a `PGSpecPlotThread` for visual inspection of a list of spectra
 ```python
