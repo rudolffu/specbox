@@ -27,7 +27,6 @@ import io
 import json
 import hashlib
 import time
-from scipy.signal import savgol_filter
 import re
 import concurrent.futures
 import threading
@@ -856,6 +855,10 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self._view_lock_active = False
         self._locked_view_range = None
         self._suspend_view_lock_updates = False
+        self.downsampling_enabled = False
+        self._downsampling_auto = False
+        self._downsampling_method = "mean"
+        self._downsampling_clip_to_view = True
 
         # ``spectra`` can either be a FITS file containing multiple extensions
         # or a list of individual spectrum files.
@@ -962,6 +965,16 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         """)
 
         self.plot_next()
+
+    @staticmethod
+    def _is_sparcl_like_spec(spec):
+        return ('SpecSparcl' in globals() and isinstance(spec, SpecSparcl)) or (
+            'SpecAIMSZReview' in globals() and isinstance(spec, SpecAIMSZReview)
+        )
+
+    def _is_current_sparcl_like(self):
+        spec = getattr(self, "spec", None)
+        return self._is_sparcl_like_spec(spec)
 
     def _default_class_token(self):
         return "QSO_DEFAULT"
@@ -1289,15 +1302,14 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         """Plot the spectrum without template."""
         spec = self.spec
         dual = self.spec_dual
-        is_sparcl = ('SpecSparcl' in globals() and isinstance(spec, SpecSparcl)) or (
-            'SpecAIMSZReview' in globals() and isinstance(spec, SpecAIMSZReview)
-        )
+        is_sparcl = self._is_sparcl_like_spec(spec)
         is_euclid = getattr(spec, 'telescope', '').lower() == 'euclid'
         is_euclid_dual = dual is not None
         self._observed_wmin = None
         self._observed_wmax = None
         self._annotation_wave = None
         self._annotation_flux = None
+        self.flux_sm = None
         self._set_legend(is_euclid_dual)
         annotation_wave_parts = []
         annotation_flux_parts = []
@@ -1407,15 +1419,12 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             annotation_flux_parts = [np.asarray(flux)]
 
             if is_sparcl:
-                self.plot(wave, flux, pen=pg.mkPen((0, 0, 255, 40), width=1), antialias=True)
-                n = int(len(flux))
-                if n >= 7:
-                    window_length = min(31, n if n % 2 == 1 else n - 1)
-                    if window_length >= 7:
-                        polyorder = 3 if window_length > 3 else 2
-                        flux_sm = savgol_filter(flux, window_length=window_length, polyorder=polyorder)
-                        self.flux_sm = flux_sm
-                        self.plot(wave, flux_sm, pen=pg.mkPen('k', width=3.5), antialias=True)
+                if self.downsampling_enabled:
+                    downsample_item = self.plot(wave, flux, pen=pg.mkPen('k', width=2), antialias=True)
+                    downsample_item.setDownsampling(ds=3, auto=self._downsampling_auto, method=self._downsampling_method)
+                    downsample_item.setClipToView(self._downsampling_clip_to_view)
+                else:
+                    self.plot(wave, flux, pen=pg.mkPen('k', width=1.5), antialias=True)
 
                 euclid_object_id = getattr(spec, "euclid_object_id", None)
                 dr_text = str(getattr(spec, "data_release", "") or "")
@@ -1568,13 +1577,18 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             if fixed_zero_ylim is not None:
                 self.enableAutoRange(axis='y', enable=False)
                 self.setYRange(float(fixed_zero_ylim[0]), float(fixed_zero_ylim[1]), padding=0.0)
-            elif is_sparcl and hasattr(self, 'flux_sm') and self.flux_sm is not None:
-                finite_sm = self.flux_sm[np.isfinite(self.flux_sm)]
-                if finite_sm.size > 0:
+            elif is_sparcl:
+                flux_ref = np.asarray(getattr(self, 'flux', []), dtype=float)
+                finite_flux = flux_ref[np.isfinite(flux_ref)]
+                if finite_flux.size > 0:
                     self.enableAutoRange(axis='y', enable=False)
-                    y1, y2 = np.percentile(finite_sm, [0.01, 99.99])
-                    ymin = y1 - 0.1 * (y2 - y1)
-                    ymax = y2 + 0.1 * (y2 - y1)
+                    y1, y2 = np.percentile(finite_flux, [0.01, 99.99])
+                    ymin = y1 - 0.05 * (y2 - y1)
+                    ymax = y2 + 0.05 * (y2 - y1)
+                    if ymin == ymax:
+                        pad = abs(ymin) * 0.1 if ymin != 0 else 1.0
+                        ymin -= pad
+                        ymax += pad
                     self.setYRange(ymin, ymax, padding=0.05)
                 else:
                     self.enableAutoRange(axis='y', enable=True)
@@ -1770,8 +1784,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         y_ref = None
         if hasattr(self, 'flux') and self.flux is not None and len(self.flux) > 0:
             try:
-                flux_to_use = self.flux_sm if hasattr(self, 'flux_sm') and self.flux_sm is not None else self.flux
-                y_ref = float(np.nanmax(flux_to_use))
+                y_ref = float(np.nanmax(self.flux))
             except Exception:
                 y_ref = None
         if y_ref is None or not np.isfinite(y_ref):
@@ -2124,7 +2137,14 @@ class PGSpecPlotAppEnhanced(QApplication):
             return False
 
     @classmethod
-    def _normalize_loaded_objid(cls, row, *, is_aimsz_review=False, aimsz_lookup=None):
+    def _is_sparcl_class(cls, spec_class):
+        try:
+            return issubclass(spec_class, SpecSparcl)
+        except Exception:
+            return False
+
+    @classmethod
+    def _normalize_loaded_objid(cls, row, *, is_aimsz_review=False, is_sparcl=False, aimsz_lookup=None):
         if is_aimsz_review:
             object_id = cls._clean_scalar(row.get("object_id", None))
             if object_id is not None:
@@ -2143,6 +2163,22 @@ class PGSpecPlotAppEnhanced(QApplication):
             if targetid is not None:
                 return SpecAIMSZReview._canonical_objid(str(targetid).strip())
             return None
+        if is_sparcl:
+            sparcl_id = cls._clean_scalar(row.get("sparcl_id", None))
+            targetid = cls._clean_scalar(row.get("targetid", None))
+            specid = cls._clean_scalar(row.get("specid", None))
+            raw_objid = cls._clean_scalar(row.get("objid", None))
+            if isinstance(raw_objid, str):
+                raw_text = raw_objid.strip()
+                if raw_text.startswith(("sparcl:", "targetid:", "specid:", "sparcl-row:")):
+                    return raw_text
+            return SpecSparcl._canonical_objid(
+                sparcl_id=sparcl_id,
+                targetid=targetid if targetid is not None else raw_objid,
+                specid=specid if specid is not None else raw_objid,
+                filename=None,
+                row=0,
+            )
         raw_objid = cls._clean_scalar(row.get("objid", None))
         return cls._normalize_objid(raw_objid)
 
@@ -2178,6 +2214,7 @@ class PGSpecPlotAppEnhanced(QApplication):
         self.spectra = spectra
         self.SpecClass = SpecClass
         self._is_aimsz_review = self._is_aimsz_review_class(self.SpecClass)
+        self._is_sparcl = self._is_sparcl_class(self.SpecClass)
         self._session_reviewer = default_reviewer_username()
         self.euclid_fits = euclid_fits
         if enable_image_panel is None:
@@ -2203,6 +2240,7 @@ class PGSpecPlotAppEnhanced(QApplication):
                 objid = self._normalize_loaded_objid(
                     row,
                     is_aimsz_review=self._is_aimsz_review,
+                    is_sparcl=self._is_sparcl,
                 )
                 if objid is None:
                     continue
@@ -2288,6 +2326,7 @@ class PGSpecPlotAppEnhanced(QApplication):
                 spec.reviewer = self._session_reviewer
         self.sync_qa_checkbox_from_current_spec()
         self._update_go_to_controls()
+        self._update_downsample_toggle()
 
     def on_record_committed(self, objid):
         if not self._is_aimsz_review:
@@ -2484,6 +2523,23 @@ class PGSpecPlotAppEnhanced(QApplication):
         # Run in background thread
         threading.Thread(target=prefetch_worker, daemon=True).start()
 
+    def _update_downsample_toggle(self):
+        if not hasattr(self, "downsample_toggle"):
+            return
+        enabled = self.plot._is_current_sparcl_like()
+        self.downsample_toggle.blockSignals(True)
+        self.downsample_toggle.setChecked(bool(self.plot.downsampling_enabled))
+        self.downsample_toggle.setEnabled(enabled)
+        self.downsample_toggle.blockSignals(False)
+
+    def on_downsample_toggled(self, checked):
+        self.plot.downsampling_enabled = bool(checked)
+        if not hasattr(self.plot, "spec") or not self.plot._is_current_sparcl_like():
+            return
+        self.plot.clear()
+        self.plot.plot_single(preserve_view=self.plot._view_lock_active)
+        self.plot.setFocus()
+
     def make_layout(self):
         """Create the enhanced layout with image cutouts and controls."""
         layout = pg.LayoutWidget()
@@ -2522,6 +2578,15 @@ class PGSpecPlotAppEnhanced(QApplication):
                 self.image_toggle_btn.setCheckable(True)
                 self.image_toggle_btn.setMaximumHeight(35)  # Make button more compact
                 toolbar_layout.addWidget(self.image_toggle_btn)
+
+            self.downsample_toggle = QCheckBox("Downsample (n=3)")
+            self.downsample_toggle.setMaximumHeight(35)
+            self.downsample_toggle.setToolTip(
+                "Use pyqtgraph native downsampling for SPARCL/AIMS-z spectra "
+                "(mean + auto + clip-to-view)."
+            )
+            self.downsample_toggle.stateChanged.connect(self.on_downsample_toggled)
+            toolbar_layout.addWidget(self.downsample_toggle)
 
             toolbar_layout.addWidget(QLabel("Go to index:"))
             self.goto_index_spin = QSpinBox()
@@ -2630,6 +2695,7 @@ class PGSpecPlotAppEnhanced(QApplication):
             
         self.layout = layout
         self.layout.show()
+        self._update_downsample_toggle()
 
     def _default_splitter_sizes(self):
         if self._is_aimsz_review:
