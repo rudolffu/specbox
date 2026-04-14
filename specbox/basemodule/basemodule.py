@@ -569,6 +569,8 @@ class SpecSparcl(SpecPandasRow):
                 "ra",
                 "dec",
                 "redshift",
+                "z_desi",
+                "z_sdss",
                 "specid",
                 "targetid",
                 "spectype",
@@ -590,8 +592,67 @@ class SpecSparcl(SpecPandasRow):
                     self.objname = "Unknown"
             else:
                 self.objname = "Unknown"
-        if not hasattr(self, "objid"):
-            self.objid = getattr(self, "sparcl_id", getattr(self, "specid", getattr(self, "_row", 0)))
+        self.sparcl_id = self._coerce_id_value(getattr(self, "sparcl_id", None))
+        self.targetid = self._coerce_id_value(getattr(self, "targetid", None))
+        self.specid = self._coerce_id_value(getattr(self, "specid", None))
+        redshift_value = getattr(self, "redshift", None)
+        if redshift_value is None or (isinstance(redshift_value, (float, np.floating)) and not np.isfinite(redshift_value)):
+            for fallback_attr in ("z_desi", "z_sdss"):
+                fallback_value = getattr(self, fallback_attr, None)
+                if fallback_value is None:
+                    continue
+                try:
+                    if pd.isna(fallback_value):
+                        continue
+                except Exception:
+                    pass
+                self.redshift = fallback_value
+                break
+        self.objid = self._canonical_objid(
+            sparcl_id=self.sparcl_id,
+            targetid=self.targetid,
+            specid=self.specid,
+            filename=self.filename,
+            row=getattr(self, "_row", None),
+        )
+        if not hasattr(self, "review_source"):
+            self.review_source = "sparcl"
+
+    @staticmethod
+    def _coerce_id_value(value):
+        if value is None:
+            return None
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            pass
+        if isinstance(value, (np.integer, int)):
+            return int(value)
+        if isinstance(value, (np.floating, float)) and np.isfinite(value) and float(value).is_integer():
+            return int(value)
+        text = str(value).strip()
+        if not text or text.lower() == "nan":
+            return None
+        try:
+            return int(text)
+        except Exception:
+            return text
+
+    @classmethod
+    def _canonical_objid(cls, *, sparcl_id=None, targetid=None, specid=None, filename=None, row=None):
+        sparcl_value = cls._coerce_id_value(sparcl_id)
+        if sparcl_value is not None:
+            return f"sparcl:{sparcl_value}"
+        targetid_value = cls._coerce_id_value(targetid)
+        if targetid_value is not None:
+            return f"targetid:{targetid_value}"
+        specid_value = cls._coerce_id_value(specid)
+        if specid_value is not None:
+            return f"specid:{specid_value}"
+        source = Path(filename).stem if filename else "unknown"
+        row_value = 0 if row is None else int(row)
+        return f"sparcl-row:{source}:{row_value}"
 
 
 class SpecAIMSZReview(SpecPandasRow):

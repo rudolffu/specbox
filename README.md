@@ -161,6 +161,8 @@ specbox-viewer \
 
 Add `--no-images` when cutouts are unavailable or should be skipped entirely. For `aimsz-review`, images are off by default; use `--images` to opt in.
 
+For `sparcl` and `aimsz-review`, the viewer now plots raw spectra by default. Use the `Downsample` toolbar toggle to enable pyqtgraph native downsampling and draw a black downsampled trace on top.
+
 #### Run a `PGSpecPlotThread` for visual inspection of a list of spectra
 ```python
 from specbox import SpecLAMOST

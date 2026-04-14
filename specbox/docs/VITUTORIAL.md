@@ -193,6 +193,7 @@ Notes:
 - Saved session CSV columns are: `objid,targetid,ra,dec,data_release,class_vi,z_vi,qa_flag,notes,reviewer,reviewed_at`.
 - Legacy labels such as `QSO(Default)` and `LIKELY` are normalized on load; saved output always uses canonical uppercase tokens.
 - `aimsz-review` disables images and cutout downloading by default; add `--images` to opt in.
+- `sparcl` and `aimsz-review` now show raw spectra by default; use the `Downsample` toolbar toggle to turn on native pyqtgraph downsampling.
 
 ### Running the Visual Inspection Tool
 
@@ -227,6 +228,8 @@ The first time you run the tool in a new Python environment, `matplotlib` will t
 
 - **Plot Area:**  
   The main window displays the current quasar spectrum.
+- **Downsample Toggle:**  
+  For `sparcl` and `aimsz-review`, a toolbar toggle enables native pyqtgraph downsampling. When enabled, the viewer draws a black downsampled trace on top of the current raw-data view logic.
 - **Slider:**  
   A horizontal slider at the bottom controls the visually inspected redshift (`z_vi`). It uses a non-linear (1+z) mapping.
 - **Spin Box:**  

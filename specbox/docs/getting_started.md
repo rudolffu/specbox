@@ -90,6 +90,7 @@ Notes:
 - `aimsz-review` reads parquet rows directly using `wavelength`, `flux`, `ivar`, and `mask`.
 - Session CSVs use canonical string IDs like `aimsz:{object_id}` to make history loading stable.
 - `aimsz-review` disables images and cutout downloading by default; add `--images` to opt in.
+- `sparcl` and `aimsz-review` plot raw spectra by default; use the `Downsample` toolbar toggle for native pyqtgraph downsampling.
 
 ### Euclid coadd (BGS+RGS)
 
