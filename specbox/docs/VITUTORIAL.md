@@ -192,8 +192,8 @@ Notes:
 - `aimsz-review` uses canonical string history keys: `aimsz:{object_id}`.
 - Saved session CSV columns are: `objid,targetid,ra,dec,data_release,class_vi,z_vi,qa_flag,notes,reviewer,reviewed_at`.
 - Legacy labels such as `QSO(Default)` and `LIKELY` are normalized on load; saved output always uses canonical uppercase tokens.
-- `aimsz-review` disables images and cutout downloading by default; add `--images` to opt in.
 - `sparcl` and `aimsz-review` now show raw spectra by default; use the `Downsample` toolbar toggle to turn on native pyqtgraph downsampling.
+- Add `--redshift-table PATH --redshift-key object_id --redshift-column Z` to overlay an external reference-redshift catalog.
 
 ### Running the Visual Inspection Tool
 
@@ -203,7 +203,8 @@ Use the CLI:
 specbox-viewer --spectra COMBINED_SPECS.fits --spec-class euclid
 ```
 
-Add `--no-images` to disable the image panel and skip all cutout downloads. For `aimsz-review`, this is already the default and `--images` enables the image panel.
+Images and cutout downloads are off by default. Add `--images` to enable the image panel when needed, or `--no-images` for an explicit image-off CLI.
+With `--redshift-table`, the viewer loads the external table once at startup and uses startup precedence `z_vi > z_ref > z_temp > redshift`.
 
 The first time you run the tool in a new Python environment, `matplotlib` will take some time to build the font cache. Subsequent runs will be faster.
 
@@ -220,6 +221,9 @@ The first time you run the tool in a new Python environment, `matplotlib` will t
 - **no-images:**  
   Optional CLI flag to disable the image panel and all cutout downloading when remote cutouts are not needed or unavailable.
 
+- **images:**  
+  Optional CLI flag to enable the image panel and cutout downloading.
+
 ---
 
 ## User Interface Overview
@@ -230,6 +234,8 @@ The first time you run the tool in a new Python environment, `matplotlib` will t
   The main window displays the current quasar spectrum.
 - **Downsample Toggle:**  
   For `sparcl` and `aimsz-review`, a toolbar toggle enables native pyqtgraph downsampling. When enabled, the viewer draws a black downsampled trace on top of the current raw-data view logic.
+- **External Redshift Overlay:**  
+  Add `--redshift-table`, `--redshift-key`, and `--redshift-column` to inject `z_ref` values from an external FITS/parquet/CSV catalog without modifying the original spectra files.
 - **Slider:**  
   A horizontal slider at the bottom controls the visually inspected redshift (`z_vi`). It uses a non-linear (1+z) mapping.
 - **Spin Box:**  

@@ -569,6 +569,7 @@ class SpecSparcl(SpecPandasRow):
                 "ra",
                 "dec",
                 "redshift",
+                "z_ref",
                 "z_desi",
                 "z_sdss",
                 "specid",
@@ -789,8 +790,12 @@ class SpecEuclidCoaddRow(SpecPandasRow):
             flux_unit=flux_unit,
             meta_cols=(
                 "objid",
+                "object_id",
                 "ra",
                 "dec",
+                "z_vi",
+                "z_temp",
+                "z_ref",
                 "scale_bgs_to_rgs",
                 "scale_status",
                 "overlap_wmin",
@@ -1506,6 +1511,10 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             err = err[start:stop]
             if self.mask is not None:
                 self.mask = np.asarray(self.mask)[start:stop]
+            if getattr(self, "quality", None) is not None:
+                self.quality = np.asarray(self.quality)[start:stop]
+            if getattr(self, "ndith", None) is not None:
+                self.ndith = np.asarray(self.ndith)[start:stop]
             if self.data is not None:
                 self.data = self.data[start:stop]
         if self.mask is not None:
@@ -1517,6 +1526,10 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
                 flux = flux[self.good_mask]
                 err = err[self.good_mask]
                 self.mask = self.mask[self.good_mask]
+                if getattr(self, "quality", None) is not None:
+                    self.quality = np.asarray(self.quality)[self.good_mask]
+                if getattr(self, "ndith", None) is not None:
+                    self.ndith = np.asarray(self.ndith)[self.good_mask]
                 if self.data is not None:
                     self.data = self.data[self.good_mask]
         elif good_pixels_only:
@@ -1551,6 +1564,62 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         if self.z_vi is not None and self.z_vi > 0:
             self.redshift = self.z_vi
 
+    @staticmethod
+    def _coerce_optional_id(value):
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            pass
+        if isinstance(value, (np.integer, int)):
+            return int(value)
+        if isinstance(value, (np.floating, float)) and np.isfinite(value) and float(value).is_integer():
+            return int(value)
+        return value
+
+    @staticmethod
+    def _row_array(row, df, columns, *, required=True):
+        for col in columns:
+            if col in df.columns:
+                value = row[col]
+                if value is None:
+                    continue
+                return np.asarray(value, dtype=float)
+        if required:
+            raise KeyError(
+                "None of the required array columns are present: "
+                + ", ".join(str(col) for col in columns)
+            )
+        return None
+
+    @classmethod
+    def _row_error_array(cls, row, df, flux_shape):
+        err = cls._row_array(row, df, ("err", "error", "uncertainty"), required=False)
+        if err is not None:
+            return err
+
+        variance = cls._row_array(row, df, ("var", "variance"), required=False)
+        if variance is not None:
+            variance = np.asarray(variance, dtype=float)
+            err = np.full_like(variance, np.inf, dtype=float)
+            good = np.isfinite(variance) & (variance >= 0)
+            err[good] = np.sqrt(variance[good])
+            return err
+
+        ivar = cls._row_array(row, df, ("ivar", "inverse_variance"), required=False)
+        if ivar is not None:
+            ivar = np.asarray(ivar, dtype=float)
+            err = np.full_like(ivar, np.inf, dtype=float)
+            good = np.isfinite(ivar) & (ivar > 0)
+            err[good] = np.sqrt(1.0 / ivar[good])
+            return err
+
+        warnings.warn(
+            "Euclid parquet row has no err/var/ivar column; using infinite uncertainties.",
+            UserWarning,
+        )
+        return np.full(flux_shape, np.inf, dtype=float)
+
     def _read_dataframe_backed(self, filename, ext=None, extname=None, clip=True, good_pixels_only=False):
         df = SpecPandasRow._read_dataframe_file(filename, file_format="parquet")
         idx = self._find_dataframe_row(df, ext=ext, extname=extname)
@@ -1568,9 +1637,13 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.wave_unit = u.Angstrom
         self.flux_unit = u.erg / u.s / u.cm**2 / u.Angstrom
 
-        wave = np.asarray(row["wavelength"], dtype=float)
-        flux = np.asarray(row["flux"], dtype=float)
-        err = np.asarray(row["err"], dtype=float)
+        wave = self._row_array(row, df, ("wavelength", "wave"))
+        flux = self._row_array(row, df, ("flux", "signal"))
+        err = self._row_error_array(row, df, flux.shape)
+        if err.shape[0] != flux.shape[0]:
+            raise ValueError(
+                f"error and flux length mismatch: {err.shape[0]} vs {flux.shape[0]}"
+            )
         data_length = len(wave)
         wave, flux, err = self._apply_mask_and_clip(
             wave,
@@ -1581,10 +1654,11 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             good_pixels_only=good_pixels_only,
         )
 
-        objname = row.get("objname", row.get("extname", row.get("objid", "Unknown")))
-        objid = row.get("objid", row.get("extname", idx))
-        if isinstance(objid, float) and np.isfinite(objid) and objid.is_integer():
-            objid = int(objid)
+        object_id = self._coerce_optional_id(row.get("object_id", None))
+        source_id = self._coerce_optional_id(row.get("source_id", None))
+        objname = row.get("objname", row.get("extname", row.get("objid", object_id if object_id is not None else "Unknown")))
+        objid = row.get("objid", row.get("extname", object_id if object_id is not None else idx))
+        objid = self._coerce_optional_id(objid)
         ext_value = row.get("ext", ext)
         if isinstance(ext_value, float) and np.isfinite(ext_value) and ext_value.is_integer():
             ext_value = int(ext_value)
@@ -1604,6 +1678,13 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             z_vi=row.get("z_vi", 0.0),
             z_temp=row.get("z_temp", None),
         )
+        self.object_id = object_id if object_id is not None else objid
+        self.source_id = source_id
+        self.extname = row.get("extname", objname)
+        if "z_ref" in df.columns:
+            self.z_ref = row.get("z_ref", None)
+        if "z_hybrid" in df.columns:
+            self.z_hybrid = row.get("z_hybrid", None)
 
     def __init__(self, filename=None, ext=None, extname=None, clip=True, good_pixels_only=False, redshift=None, lrange=None, *args, **kwargs):
         """

@@ -20,7 +20,11 @@ from .auxmodule.pcf_redshift import (
     update_fits_z_temp,
     update_parquet_z_temp,
 )
-from .basemodule import SpecAIMSZReview, SpecEuclid1d, SpecIRAF, SpecLAMOST, SpecSDSS, SpecSparcl
+from .auxmodule.external_redshift import (
+    load_external_redshift_lookup,
+    merge_external_redshift_into_parquet,
+)
+from .basemodule import SpecAIMSZReview, SpecEuclid1d, SpecIRAF, SpecLAMOST, SpecPandasRow, SpecSDSS, SpecSparcl
 from .examples.tools.build_euclid_bgs_rgs_coadd import build_coadds
 from .examples.tools.build_euclid_raw_parquet import build_raw_euclid_parquet
 from .basemodule import SpecEuclidCoaddRow
@@ -83,6 +87,23 @@ def _spec_class_map() -> Dict[str, type]:
     }
 
 
+def _validate_redshift_key_in_spectra(path, key_col):
+    if path is None:
+        return
+    if not SpecEuclid1d._is_dataframe_backed_path(path):
+        return
+    df = SpecPandasRow._read_dataframe_file(path)
+    acceptable = [key_col]
+    if key_col == "object_id":
+        acceptable.extend(["objid", "extname"])
+    elif key_col == "objid":
+        acceptable.extend(["object_id", "extname"])
+    elif key_col == "extname":
+        acceptable.extend(["objid", "object_id"])
+    if not any(col in df.columns for col in acceptable):
+        raise KeyError(f"Join key column '{key_col}' not found in spectra file: {path}")
+
+
 def viewer_cli() -> None:
     parser = argparse.ArgumentParser(description="Launch specbox enhanced viewer.")
     parser.add_argument("--spectra", default=None, help="Input FITS/parquet/list file path.")
@@ -120,6 +141,9 @@ def viewer_cli() -> None:
     parser.add_argument("--ext", type=int, default=None, help="Dual-arm shared extension index.")
     parser.add_argument("--extname", default=None, help="Dual-arm shared extension name.")
     parser.add_argument("--dual-good-pixels-only", action="store_true")
+    parser.add_argument("--redshift-table", default=None, help="Optional external table providing reference redshifts.")
+    parser.add_argument("--redshift-key", default="object_id", help="Join key column/attribute used for external redshift lookup.")
+    parser.add_argument("--redshift-column", default="Z", help="Redshift column in the external table.")
     args = parser.parse_args()
     if args.images and args.no_images:
         parser.error("Use either --images or --no-images, not both.")
@@ -141,10 +165,21 @@ def viewer_cli() -> None:
     should_load_history = args.load_history
     if should_load_history is None:
         should_load_history = os.path.exists(output_file)
-    if args.spec_class == "aimsz-review":
-        enable_image_panel = bool(args.images)
-    else:
-        enable_image_panel = not args.no_images
+    enable_image_panel = bool(args.images)
+    external_redshift_lookup = {}
+    if args.redshift_table:
+        _validate_redshift_key_in_spectra(args.spectra, args.redshift_key)
+        _validate_redshift_key_in_spectra(args.rgs_file, args.redshift_key)
+        _validate_redshift_key_in_spectra(args.bgs_file, args.redshift_key)
+        external_redshift_lookup = load_external_redshift_lookup(
+            args.redshift_table,
+            key_col=args.redshift_key,
+            redshift_col=args.redshift_column,
+        )
+        print(
+            f"Loaded {len(external_redshift_lookup)} external redshift entries "
+            f"from {Path(args.redshift_table).resolve()}"
+        )
 
     viewer = PGSpecPlotThreadEnhanced(
         spectra=spectra,
@@ -161,6 +196,8 @@ def viewer_cli() -> None:
         ext=args.ext,
         extname=args.extname,
         dual_good_pixels_only=args.dual_good_pixels_only,
+        external_redshift_lookup=external_redshift_lookup,
+        external_redshift_key=args.redshift_key,
     )
     viewer.run()
 
@@ -448,3 +485,29 @@ def euclid_parquet_cli() -> None:
         output_prefix=args.output_prefix,
         parquet_chunk_size=args.parquet_chunk_size,
     )
+
+
+def merge_redshift_table_cli() -> None:
+    parser = argparse.ArgumentParser(description="Merge an external redshift table into a spectra parquet file.")
+    parser.add_argument("--spectra", required=True, help="Input spectra parquet path.")
+    parser.add_argument("--redshift-table", required=True, help="External table path (FITS/parquet/CSV).")
+    parser.add_argument("--redshift-key", default="object_id", help="Join key column shared by spectra and redshift table.")
+    parser.add_argument("--redshift-column", default="Z", help="Redshift column in the external table.")
+    parser.add_argument("--output", required=True, help="Output parquet path.")
+    parser.add_argument(
+        "--fill-z-vi",
+        action="store_true",
+        help="Fill z_vi only where the current z_vi is missing or <= 0.",
+    )
+    args = parser.parse_args()
+
+    out = merge_external_redshift_into_parquet(
+        args.spectra,
+        table_path=args.redshift_table,
+        key_col=args.redshift_key,
+        redshift_col=args.redshift_column,
+        output_path=args.output,
+        fill_z_vi=args.fill_z_vi,
+    )
+    n_ref = int(np.isfinite(pd.to_numeric(out.get("z_ref"), errors="coerce")).sum()) if "z_ref" in out.columns else 0
+    print(f"Wrote {Path(args.output).resolve()} with {n_ref} rows carrying z_ref.")

@@ -45,6 +45,7 @@ from ..auxmodule.cutout_download import (
     print_cli_progress,
     save_cutout_to_cache,
 )
+from ..auxmodule.external_redshift import normalize_redshift_lookup_key
 
 # locate the data files in the package
 data_path = Path(files("specbox").joinpath("data/templates"))
@@ -162,6 +163,43 @@ def load_template_table(template_path):
         "wave": np.asarray(table[wave_col], dtype=float),
         "flux": np.asarray(table[flux_col], dtype=float),
     }
+
+
+def _is_dataframe_backed_spectrum_path(path):
+    return SpecEuclid1d._is_dataframe_backed_path(path)
+
+
+def _choose_dual_pair_key_column(rgs_df, bgs_df):
+    for column in ("extname", "objid"):
+        if column in rgs_df.columns and column in bgs_df.columns:
+            return column
+    return None
+
+
+def _ordered_shared_dual_pair_keys(rgs_file, bgs_file):
+    if not (_is_dataframe_backed_spectrum_path(rgs_file) and _is_dataframe_backed_spectrum_path(bgs_file)):
+        return [], None
+
+    rgs_df = SpecPandasRow._read_dataframe_file(rgs_file, file_format="parquet")
+    bgs_df = SpecPandasRow._read_dataframe_file(bgs_file, file_format="parquet")
+    key_column = _choose_dual_pair_key_column(rgs_df, bgs_df)
+    if key_column is None:
+        return [], None
+
+    bgs_keys = {
+        str(value).strip()
+        for value in bgs_df[key_column]
+        if value is not None and str(value).strip() not in ("", "nan", "None")
+    }
+    ordered = []
+    seen = set()
+    for value in rgs_df[key_column]:
+        key = str(value).strip()
+        if key in ("", "nan", "None") or key not in bgs_keys or key in seen:
+            continue
+        ordered.append(key)
+        seen.add(key)
+    return ordered, key_column
 
 
 class ImageCutoutWidget(QWidget):
@@ -833,12 +871,15 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
     def __init__(self, spectra, SpecClass=SpecEuclid1d, initial_counter=0,
                  z_max=5.0, history_dict=None, euclid_fits=None,
                  rgs_file=None, bgs_file=None, ext=None, extname=None,
-                 dual_good_pixels_only=False):
+                 dual_good_pixels_only=False, external_redshift_lookup=None,
+                 external_redshift_key="object_id"):
         super().__init__()
         self.SpecClass = SpecClass
         self._is_aimsz_review = issubclass(SpecClass, SpecAIMSZReview)
         self.template_manager = TemplateManager()
         self.euclid_fits = euclid_fits
+        self.external_redshift_lookup = dict(external_redshift_lookup or {})
+        self.external_redshift_key = str(external_redshift_key or "object_id")
         self._euclid_overlay_cache = {}
         self.dual_rgs_file = rgs_file
         self.dual_bgs_file = bgs_file
@@ -846,6 +887,9 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self.dual_extname = extname
         self.dual_good_pixels_only = bool(dual_good_pixels_only)
         self._dual_mode = bool(self.dual_rgs_file and self.dual_bgs_file)
+        self._dual_parquet_mode = self._dual_mode and _is_dataframe_backed_spectrum_path(self.dual_rgs_file) and _is_dataframe_backed_spectrum_path(self.dual_bgs_file)
+        self._dual_pair_keys = []
+        self._dual_pair_key_column = None
         self.spec_dual = None
         self._legend = None
         self._observed_wmin = None
@@ -865,7 +909,16 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         if self._dual_mode:
             self.speclist = None
             self.specfile = self.dual_rgs_file
-            if self.dual_ext is not None or self.dual_extname not in (None, ""):
+            if self._dual_parquet_mode:
+                self._dual_pair_keys, self._dual_pair_key_column = _ordered_shared_dual_pair_keys(
+                    self.dual_rgs_file,
+                    self.dual_bgs_file,
+                )
+                if self.dual_ext is not None or self.dual_extname not in (None, ""):
+                    self.len_list = 1
+                else:
+                    self.len_list = len(self._dual_pair_keys)
+            elif self.dual_ext is not None or self.dual_extname not in (None, ""):
                 self.len_list = 1
             else:
                 rgs_count = self._count_hdus_in_file(self.dual_rgs_file)
@@ -985,6 +1038,67 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             reviewer = default_reviewer_username()
         return str(reviewer or "")
 
+    @staticmethod
+    def _is_positive_finite(value):
+        try:
+            value = float(value)
+        except Exception:
+            return False
+        return np.isfinite(value) and value > 0
+
+    def _lookup_external_redshift_value(self, spec):
+        if not self.external_redshift_lookup:
+            return None
+        candidate_attrs = [self.external_redshift_key]
+        if self.external_redshift_key == "object_id":
+            candidate_attrs.extend(["object_id", "objid", "extname"])
+        elif self.external_redshift_key == "objid":
+            candidate_attrs.extend(["objid", "object_id", "extname"])
+        elif self.external_redshift_key == "extname":
+            candidate_attrs.extend(["extname", "objid", "object_id"])
+        seen = set()
+        for attr in candidate_attrs:
+            if attr in seen:
+                continue
+            seen.add(attr)
+            key = normalize_redshift_lookup_key(getattr(spec, attr, None))
+            if key is None:
+                continue
+            if key in self.external_redshift_lookup:
+                return self.external_redshift_lookup[key]
+        return None
+
+    def _apply_external_redshift_to_spec(self, spec):
+        z_ref = self._lookup_external_redshift_value(spec)
+        if z_ref is None:
+            return None
+        spec.z_ref = z_ref
+        return z_ref
+
+    def _apply_external_redshift_overlay(self, spec, dual=None):
+        applied = None
+        if dual is not None:
+            for arm in (getattr(dual, "rgs", None), getattr(dual, "bgs", None)):
+                if arm is None:
+                    continue
+                z_ref = self._apply_external_redshift_to_spec(arm)
+                if applied is None and z_ref is not None:
+                    applied = z_ref
+        if applied is None:
+            applied = self._apply_external_redshift_to_spec(spec)
+        elif getattr(spec, "z_ref", None) in (None, "", 0, 0.0):
+            spec.z_ref = applied
+        return applied
+
+    def _prime_initial_redshift(self, spec):
+        if self._is_positive_finite(getattr(spec, "z_vi", None)):
+            return
+        for attr in ("z_ref", "z_temp", "redshift"):
+            value = getattr(spec, attr, None)
+            if self._is_positive_finite(value):
+                spec.z_vi = float(value)
+                return
+
     def _new_history_record(self, spec, class_vi="", z_vi=None):
         return {
             "objname": getattr(spec, "objname", "Unknown"),
@@ -1062,6 +1176,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
     def _apply_history_to_spec(self, spec):
         record = self._history_record(spec=spec, create=False)
         if record is None:
+            self._prime_initial_redshift(spec)
             return None
         spec.z_vi = record.get("z_vi", getattr(spec, "z_vi", 0.0))
         spec.qa_flag = int(record.get("qa_flag", getattr(spec, "qa_flag", 0)) or 0)
@@ -1167,11 +1282,28 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self._ensure_spec_defaults(spec)
         return spec
 
+    def _resolve_dual_selector(self, index_zero_based):
+        if not self._dual_parquet_mode:
+            ext = self.dual_ext if self.dual_ext is not None else index_zero_based + 1
+            extname = self.dual_extname
+            if extname in ("",):
+                extname = None
+            return ext, extname
+
+        if self.dual_extname not in (None, ""):
+            return None, str(self.dual_extname)
+        if self.dual_ext is not None:
+            pair_index = int(self.dual_ext) - 1
+        else:
+            pair_index = int(index_zero_based)
+        if pair_index < 0 or pair_index >= len(self._dual_pair_keys):
+            raise IndexError(
+                f"Dual-arm parquet pair index {pair_index} out of range for {len(self._dual_pair_keys)} shared pairs"
+            )
+        return None, self._dual_pair_keys[pair_index]
+
     def _load_dual_spec(self, index_zero_based):
-        ext = self.dual_ext if self.dual_ext is not None else index_zero_based + 1
-        extname = self.dual_extname
-        if extname in ("",):
-            extname = None
+        ext, extname = self._resolve_dual_selector(index_zero_based)
         dual = SpecEuclid1dDual(
             rgs_file=self.dual_rgs_file,
             bgs_file=self.dual_bgs_file,
@@ -1183,6 +1315,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         if spec is None:
             raise RuntimeError("SpecEuclid1dDual returned no arm data.")
         self._ensure_spec_defaults(spec)
+        self._apply_external_redshift_overlay(spec, dual=dual)
         return spec, dual
 
     def _load_current_spec(self, index_zero_based):
@@ -1191,7 +1324,9 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             self.spec_dual = dual
             return spec
         self.spec_dual = None
-        return self._load_spec(index_zero_based)
+        spec = self._load_spec(index_zero_based)
+        self._apply_external_redshift_overlay(spec)
+        return spec
 
     def _ensure_spec_defaults(self, spec):
         """Ensure common attributes exist on ``spec``."""
@@ -1653,6 +1788,10 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         parts.append(_fmt_z("z_vi", z_vi, hide_zero=False) or "z_vi = -")
         if class_vi not in (None, ""):
             parts.append(f"class_vi: {display_class_label(class_vi)}")
+        if not self._is_aimsz_review:
+            z_ref_str = _fmt_z("z_ref", getattr(spec, "z_ref", None), hide_zero=False)
+            if z_ref_str is not None:
+                parts.append(z_ref_str)
 
         if (('SpecSparcl' in globals() and isinstance(spec, SpecSparcl)) or
                 ('SpecAIMSZReview' in globals() and isinstance(spec, SpecAIMSZReview))):
@@ -2208,7 +2347,8 @@ class PGSpecPlotAppEnhanced(QApplication):
                  euclid_fits=None, cutout_buffer_dir=None, enable_image_panel=None,
                  enable_background_prefetch=None,
                  rgs_file=None, bgs_file=None, ext=None, extname=None,
-                 dual_good_pixels_only=False):
+                 dual_good_pixels_only=False, external_redshift_lookup=None,
+                 external_redshift_key="object_id"):
         super().__init__(sys.argv)
         self.output_file = output_file
         self.spectra = spectra
@@ -2218,7 +2358,7 @@ class PGSpecPlotAppEnhanced(QApplication):
         self._session_reviewer = default_reviewer_username()
         self.euclid_fits = euclid_fits
         if enable_image_panel is None:
-            enable_image_panel = not self._is_aimsz_review
+            enable_image_panel = False
         self.enable_image_panel = bool(enable_image_panel)
         if enable_background_prefetch is None:
             enable_background_prefetch = self.enable_image_panel
@@ -2229,6 +2369,8 @@ class PGSpecPlotAppEnhanced(QApplication):
         self.dual_extname = extname
         self.dual_good_pixels_only = bool(dual_good_pixels_only)
         self._dual_mode = bool(self.rgs_file and self.bgs_file)
+        self.external_redshift_lookup = dict(external_redshift_lookup or {})
+        self.external_redshift_key = str(external_redshift_key or "object_id")
 
         if load_history and os.path.exists(self.output_file):
             print(f"Loading history from {self.output_file} ...")
@@ -2266,7 +2408,9 @@ class PGSpecPlotAppEnhanced(QApplication):
             bgs_file=self.bgs_file,
             ext=self.dual_ext,
             extname=self.dual_extname,
-            dual_good_pixels_only=self.dual_good_pixels_only)
+            dual_good_pixels_only=self.dual_good_pixels_only,
+            external_redshift_lookup=self.external_redshift_lookup,
+            external_redshift_key=self.external_redshift_key)
         self.plot._session_reviewer = self._session_reviewer
         self.len_list = self.plot.len_list
         self.plot.current_spec_changed.connect(self.on_current_spec_changed)
@@ -2891,7 +3035,7 @@ class PGSpecPlotThreadEnhanced(QThread):
         super().__init__()
         explicit_buffer_dir = kwargs.pop("cutout_buffer_dir", None)
         explicit_enable_image_panel = "enable_image_panel" in kwargs
-        if not explicit_enable_image_panel and issubclass(SpecClass, SpecAIMSZReview):
+        if not explicit_enable_image_panel:
             kwargs["enable_image_panel"] = False
         self.enable_image_panel = bool(kwargs.get("enable_image_panel", True))
         self.rgs_file = kwargs.get("rgs_file", None)
@@ -2900,6 +3044,8 @@ class PGSpecPlotThreadEnhanced(QThread):
         self.dual_extname = kwargs.get("extname", None)
         self.dual_good_pixels_only = bool(kwargs.get("dual_good_pixels_only", False))
         self._dual_mode = bool(self.rgs_file and self.bgs_file)
+        self._dual_parquet_mode = self._dual_mode and _is_dataframe_backed_spectrum_path(self.rgs_file) and _is_dataframe_backed_spectrum_path(self.bgs_file)
+        self._dual_pair_keys = []
         # Handle backward compatibility: if specfile is provided but spectra is not
         if spectra is None and specfile is not None:
             self.spectra = specfile
@@ -2915,6 +3061,8 @@ class PGSpecPlotThreadEnhanced(QThread):
         self._skip_window = False
         self._disable_background_prefetch = not self.enable_image_panel
         self.buffer_dir = None
+        if self._dual_parquet_mode:
+            self._dual_pair_keys, _ = _ordered_shared_dual_pair_keys(self.rgs_file, self.bgs_file)
         if self.enable_image_panel:
             self.buffer_dir = Path(explicit_buffer_dir) if explicit_buffer_dir else self._resolve_buffer_dir(self.spectra)
 
@@ -2975,23 +3123,33 @@ class PGSpecPlotThreadEnhanced(QThread):
         """Collect objid/ra/dec records for all spectra."""
         records = []
         if self._dual_mode:
-            if self.dual_ext is not None or self.dual_extname not in (None, ""):
-                ext_values = [self.dual_ext if self.dual_ext is not None else None]
+            if self._dual_parquet_mode:
+                if self.dual_extname not in (None, ""):
+                    selectors = [(None, str(self.dual_extname))]
+                elif self.dual_ext is not None:
+                    pair_index = int(self.dual_ext) - 1
+                    if pair_index < 0 or pair_index >= len(self._dual_pair_keys):
+                        return records
+                    selectors = [(None, self._dual_pair_keys[pair_index])]
+                else:
+                    selectors = [(None, key) for key in self._dual_pair_keys]
+            elif self.dual_ext is not None or self.dual_extname not in (None, ""):
+                selectors = [(self.dual_ext if self.dual_ext is not None else None, self.dual_extname)]
             else:
                 try:
                     total = self._count_hdus_in_file(self.rgs_file)
                 except Exception as exc:
                     print(f"Failed to determine dual spectrum count for predownload: {exc}")
                     return records
-                ext_values = list(range(1, total + 1))
+                selectors = [(ext, self.dual_extname) for ext in range(1, total + 1)]
 
-            for ext in ext_values:
+            for ext, extname in selectors:
                 try:
                     dual = SpecEuclid1dDual(
                         rgs_file=self.rgs_file,
                         bgs_file=self.bgs_file,
                         ext=ext,
-                        extname=self.dual_extname,
+                        extname=extname,
                         good_pixels_only=self.dual_good_pixels_only,
                     )
                     spec = dual.rgs if dual.rgs is not None else dual.bgs
@@ -3002,7 +3160,8 @@ class PGSpecPlotThreadEnhanced(QThread):
                     dec = getattr(spec, "dec", None)
                     records.append({"objid": objid, "ra": ra, "dec": dec})
                 except Exception as exc:
-                    print(f"Failed to load dual spectrum ext={ext} for predownload: {exc}")
+                    selector_desc = extname if extname not in (None, "") else ext
+                    print(f"Failed to load dual spectrum selector={selector_desc} for predownload: {exc}")
             return records
 
         if isinstance(self.spectra, (list, tuple, np.ndarray)):

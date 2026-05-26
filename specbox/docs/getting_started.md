@@ -78,7 +78,8 @@ specbox-viewer --spectra COMBINED_SPECS.fits --spec-class euclid
 Notes:
 - If `--output-file` is omitted, viewer writes to `vi_{input_file_name}_results.csv`.
 - History is auto-loaded when that CSV already exists.
-- Add `--no-images` to disable the image panel and all cutout downloading.
+- Images and cutout downloads are off by default; add `--images` to enable them.
+- Add `--redshift-table PATH --redshift-key object_id --redshift-column Z` to overlay a reference redshift table at startup without rewriting the source spectra.
 
 For AIMS-z review bundles:
 
@@ -89,8 +90,9 @@ specbox-viewer --spectra review_bundle_specbox.parquet --spec-class aimsz-review
 Notes:
 - `aimsz-review` reads parquet rows directly using `wavelength`, `flux`, `ivar`, and `mask`.
 - Session CSVs use canonical string IDs like `aimsz:{object_id}` to make history loading stable.
-- `aimsz-review` disables images and cutout downloading by default; add `--images` to opt in.
 - `sparcl` and `aimsz-review` plot raw spectra by default; use the `Downsample` toolbar toggle for native pyqtgraph downsampling.
+- Dual-arm Euclid parquet viewer mode pairs BGS/RGS rows by shared `extname` (or `objid` fallback), not by row index.
+- With an external redshift table, startup redshift precedence is `z_vi > z_ref > z_temp > redshift`.
 
 ### Euclid coadd (BGS+RGS)
 
@@ -118,6 +120,18 @@ specbox-viewer --spectra parquet/sz_ragn_dr1_rgs_chunk_001_part001.parquet --spe
 
 # Coadd parquet
 specbox-viewer --spectra coadd/sz_ragn_dr1_coadd_chunk_001_part001.parquet --spec-class euclid-coadd
+```
+
+### Merge an external redshift table into parquet
+
+```bash
+specbox-merge-redshift-table \
+  --spectra parquet/sz_ragn_dr1_rgs_chunk_001_part001.parquet \
+  --redshift-table catalog.fits \
+  --redshift-key object_id \
+  --redshift-column Z \
+  --output parquet/sz_ragn_dr1_rgs_chunk_001_part001_with_zref.parquet \
+  --fill-z-vi
 ```
 
 ### PCF redshift

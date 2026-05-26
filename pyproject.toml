@@ -40,6 +40,7 @@ specbox-viewer = "specbox.cli:viewer_cli"
 specbox-pcf = "specbox.cli:pcf_cli"
 specbox-coadd = "specbox.cli:coadd_cli"
 specbox-euclid-parquet = "specbox.cli:euclid_parquet_cli"
+specbox-merge-redshift-table = "specbox.cli:merge_redshift_table_cli"
 
 [tool.setuptools]
 include-package-data = true

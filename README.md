@@ -86,8 +86,12 @@ python -m pip install .
 # Viewer (history auto-loads when output CSV already exists)
 specbox-viewer --spectra your_spectra.fits --spec-class euclid
 
-# Viewer without image panel or cutout downloads
-specbox-viewer --spectra your_spectra.fits --spec-class euclid --no-images
+# Viewer with image panel / cutout downloads enabled explicitly
+specbox-viewer --spectra your_spectra.fits --spec-class euclid --images
+
+# Viewer with an external reference-redshift table
+specbox-viewer --spectra your_spectra.parquet --spec-class euclid \
+  --redshift-table catalog.fits --redshift-key object_id --redshift-column Z
 
 # AIMS-z review parquet (images are disabled by default)
 specbox-viewer --spectra review_bundle_specbox.parquet --spec-class aimsz-review
@@ -97,6 +101,11 @@ specbox-coadd --rgs-file rgs_chunk.fits --bgs-file bgs_chunk.fits --output-prefi
 
 # Convert raw single-arm Euclid FITS to parquet
 specbox-euclid-parquet --fits rgs_chunk.fits --output-prefix parquet/rgs_chunk_001
+
+# Merge an external redshift table into a spectra parquet file
+specbox-merge-redshift-table --spectra your_spectra.parquet \
+  --redshift-table catalog.fits --redshift-key object_id --redshift-column Z \
+  --output your_spectra_with_zref.parquet --fill-z-vi
 
 # PCF default: Type 1 only
 specbox-pcf --fits coadd/out_chunk_001.fits
@@ -159,9 +168,11 @@ specbox-viewer \
   --spec-class euclid-coadd
 ```
 
-Add `--no-images` when cutouts are unavailable or should be skipped entirely. For `aimsz-review`, images are off by default; use `--images` to opt in.
+Images and cutout downloads are off by default. Use `--images` to opt in, or `--no-images` for an explicit image-off command line.
 
 For `sparcl` and `aimsz-review`, the viewer now plots raw spectra by default. Use the `Downsample` toolbar toggle to enable pyqtgraph native downsampling and draw a black downsampled trace on top.
+For dual-arm Euclid parquet inputs passed via `--rgs-file` and `--bgs-file`, the viewer pairs rows by shared `extname` (or `objid` fallback), not by row index.
+When `--redshift-table` is provided, the viewer loads the external table once at startup, stores the matched value as `z_ref`, and uses startup precedence `z_vi > z_ref > z_temp > redshift`.
 
 #### Run a `PGSpecPlotThread` for visual inspection of a list of spectra
 ```python
