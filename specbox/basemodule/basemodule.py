@@ -1371,6 +1371,18 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
     Class for reading 1D spectra from Euclid. 
     The datamodel of Q1 1D spectra is described in https://euclid.esac.esa.int/dr/q1/dpdd/sirdpd/dpcards/sir_combinedspectra.html.
     """
+    REDSHIFT_PRIORITY = (
+        "z_vi",
+        "z_sdss",
+        "z_desi",
+        "z_hybrid",
+        "z_fusion",
+        "z_temp",
+        "z_pcf_best",
+        "z_gaia",
+        "z_phot",
+    )
+
     @staticmethod
     def _parse_scaled_unit(unit_text, default_unit):
         """Parse unit strings that may embed a numeric scale.
@@ -1539,7 +1551,7 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             )
         return wave, flux, err
 
-    def _finalize_euclid_spectrum(self, *, wave, flux, err, objname, objid, filename, ext, ra, dec, z_ph, z_gaia, z_vi, z_temp):
+    def _finalize_euclid_spectrum(self, *, wave, flux, err, objname, objid, filename, ext, ra, dec, z_ph, z_gaia, z_vi, z_temp, resolve_initial_redshift=True):
         self.wave = wave * self.wave_unit
         self.flux = flux * self.flux_unit
         self.err = err
@@ -1555,14 +1567,24 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.ra = ra
         self.dec = dec
         self.z_ph = z_ph
+        self.z_phot = z_ph
         self.z_gaia = z_gaia
         self.z_vi = z_vi
         self.z_temp = z_temp
-        if self.z_temp is not None and self.z_temp > 0:
-            if abs(self.z_vi - self.z_temp) < 0.01 or self.z_vi == 0:
-                self.z_vi = self.z_temp
-        if self.z_vi is not None and self.z_vi > 0:
+        self.z_vi_source = None
+        self.z_vi_initial = None
+        if resolve_initial_redshift:
+            self._resolve_initial_redshift()
+        if self._is_usable_redshift(self.z_vi):
             self.redshift = self.z_vi
+
+    @staticmethod
+    def _is_usable_redshift(value):
+        try:
+            value = float(value)
+        except Exception:
+            return False
+        return np.isfinite(value) and value > 0
 
     @staticmethod
     def _coerce_optional_id(value):
@@ -1620,6 +1642,30 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         )
         return np.full(flux_shape, np.inf, dtype=float)
 
+    @staticmethod
+    def _row_scalar(row, df, column, default=None):
+        if column not in df.columns:
+            return default
+        value = row.get(column, default)
+        try:
+            if pd.isna(value):
+                return default
+        except Exception:
+            pass
+        return value
+
+    def _resolve_initial_redshift(self):
+        self.z_vi_source = None
+        self.z_vi_initial = None
+        for attr in self.REDSHIFT_PRIORITY:
+            value = getattr(self, attr, None)
+            if self._is_usable_redshift(value):
+                self.z_vi = float(value)
+                self.z_vi_initial = float(value)
+                self.z_vi_source = attr
+                return self.z_vi
+        return None
+
     def _read_dataframe_backed(self, filename, ext=None, extname=None, clip=True, good_pixels_only=False):
         df = SpecPandasRow._read_dataframe_file(filename, file_format="parquet")
         idx = self._find_dataframe_row(df, ext=ext, extname=extname)
@@ -1663,6 +1709,11 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         if isinstance(ext_value, float) and np.isfinite(ext_value) and ext_value.is_integer():
             ext_value = int(ext_value)
 
+        z_temp = self._row_scalar(row, df, "z_temp", None)
+        z_pcf_best = self._row_scalar(row, df, "z_pcf_best", None)
+        z_phot = self._row_scalar(row, df, "z_phot", None)
+        z_ph = self._row_scalar(row, df, "z_ph", z_phot if z_phot is not None else 0.0)
+
         self._finalize_euclid_spectrum(
             wave=wave,
             flux=flux,
@@ -1673,18 +1724,38 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             ext=ext_value,
             ra=row.get("ra", 0.0),
             dec=row.get("dec", 0.0),
-            z_ph=row.get("z_ph", 0.0),
-            z_gaia=row.get("z_gaia", 0.0),
-            z_vi=row.get("z_vi", 0.0),
-            z_temp=row.get("z_temp", None),
+            z_ph=z_ph,
+            z_gaia=self._row_scalar(row, df, "z_gaia", 0.0),
+            z_vi=self._row_scalar(row, df, "z_vi", 0.0),
+            z_temp=z_temp,
+            resolve_initial_redshift=False,
         )
         self.object_id = object_id if object_id is not None else objid
         self.source_id = source_id
         self.extname = row.get("extname", objname)
+        for col in (
+            "z_sdss",
+            "z_desi",
+            "z_hybrid",
+            "z_fusion",
+            "z_pcf_best",
+            "z_phot",
+            "z",
+            "z_source",
+            "class_vi",
+            "vi_qa_flag",
+        ):
+            if col in df.columns:
+                setattr(self, col, self._row_scalar(row, df, col, None))
+        if "z_phot" not in df.columns:
+            self.z_phot = self.z_ph
+        if "z_pcf_best" not in df.columns:
+            self.z_pcf_best = None
+        self._resolve_initial_redshift()
+        if self._is_usable_redshift(self.z_vi):
+            self.redshift = self.z_vi
         if "z_ref" in df.columns:
             self.z_ref = row.get("z_ref", None)
-        if "z_hybrid" in df.columns:
-            self.z_hybrid = row.get("z_hybrid", None)
 
     def __init__(self, filename=None, ext=None, extname=None, clip=True, good_pixels_only=False, redshift=None, lrange=None, *args, **kwargs):
         """
@@ -1873,6 +1944,15 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             z_vi=hdu.header.get('Z_VI', 0.0),
             z_temp=hdu.header.get('Z_TEMP', None),
         )
+        source_id = self._coerce_optional_id(
+            hdu.header.get("SOURCE_ID", hdu.header.get("EXTNAME", hdu.name))
+        )
+        object_id = self._coerce_optional_id(
+            hdu.header.get("OBJECT_ID", source_id if source_id is not None else objid)
+        )
+        self.source_id = source_id
+        self.object_id = object_id if object_id is not None else objid
+        self.extname = hdu.header.get("EXTNAME", hdu.name)
 
     def read_parquet(self, filename, ext=None, extname=None, clip=True, good_pixels_only=False, lrange=None, **kwargs):
         self.lrange = lrange

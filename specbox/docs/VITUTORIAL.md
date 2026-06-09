@@ -204,7 +204,8 @@ specbox-viewer --spectra COMBINED_SPECS.fits --spec-class euclid
 ```
 
 Images and cutout downloads are off by default. Add `--images` to enable the image panel when needed, or `--no-images` for an explicit image-off CLI.
-With `--redshift-table`, the viewer loads the external table once at startup and uses startup precedence `z_vi > z_ref > z_temp > redshift`.
+For processed Euclid parquet files, viewer startup uses the first positive finite redshift in `z_vi > z_sdss > z_desi > z_hybrid > z_fusion > z_temp > z_pcf_best > z_gaia > z_phot`. `z_temp` and `z_pcf_best` are aliases, with `z_temp` preferred when both are present.
+With `--redshift-table`, the viewer loads the external table once at startup and stores the matched value as `z_ref`; this remains an external overlay and is not part of the processed Euclid parquet priority list.
 
 The first time you run the tool in a new Python environment, `matplotlib` will take some time to build the font cache. Subsequent runs will be faster.
 
@@ -215,7 +216,7 @@ The first time you run the tool in a new Python environment, `matplotlib` will t
 - **output_file:**  
   The CSV file where inspection results (object classification and redshift) are saved. If omitted, viewer uses `vi_{input_file_name}_results.csv`.
 - **z_max:**  
-  The maximum redshift to be considered for the slider. The default is 5.0.
+  The maximum redshift to be considered for the slider. Defaults are 6.0 for `euclid`, 7.0 for `sparcl`/`aimsz-review`, and 5.0 for other spectrum classes.
 - **load_history:**  
   Optional CLI flag to force history loading. By default, history is auto-loaded when the output CSV exists.
 - **no-images:**  
@@ -236,6 +237,8 @@ The first time you run the tool in a new Python environment, `matplotlib` will t
   For `sparcl` and `aimsz-review`, a toolbar toggle enables native pyqtgraph downsampling. When enabled, the viewer draws a black downsampled trace on top of the current raw-data view logic.
 - **External Redshift Overlay:**  
   Add `--redshift-table`, `--redshift-key`, and `--redshift-column` to inject `z_ref` values from an external FITS/parquet/CSV catalog without modifying the original spectra files.
+- **Euclid processed parquet redshifts:**  
+  `SpecEuclid1d` reads optional scalar columns `z_vi`, `z_sdss`, `z_desi`, `z_hybrid`, `z_fusion`, `z_temp`, `z_pcf_best`, `z_gaia`, and `z_phot`. If `z_vi` is missing or not usable, the slider starts from the highest-priority available fallback and the message panel reports the selected source.
 - **Slider:**  
   A horizontal slider at the bottom controls the visually inspected redshift (`z_vi`). It uses a non-linear (1+z) mapping.
 - **Spin Box:**  

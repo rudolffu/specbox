@@ -153,13 +153,20 @@ sp1 = SpecSparcl("sparcl_spectra.parquet", ext=1)
 sp1.plot()
 ```
 
-#### Reading raw Euclid spectra from parquet rows
+#### Reading Euclid spectra from parquet rows
 ```python
 from specbox.basemodule import SpecEuclid1d
 
 sp = SpecEuclid1d("sz_ragn_dr1_rgs_chunk_001_part001.parquet", ext=1)
 sp.plot()
 ```
+
+Euclid parquet rows may use raw archive columns (`wavelength`, `flux` or `signal`,
+`var`, `mask`, `quality`, `ndith`) or processed spectra columns. Processed files
+can include redshift candidates; viewer startup uses the first positive finite
+value in `z_vi > z_sdss > z_desi > z_hybrid > z_fusion > z_temp > z_pcf_best >
+z_gaia > z_phot`. `z_temp` and `z_pcf_best` are treated as aliases, with
+`z_temp` preferred when both are present.
 
 #### Run the viewer on Euclid coadd parquet
 ```bash
@@ -172,7 +179,7 @@ Images and cutout downloads are off by default. Use `--images` to opt in, or `--
 
 For `sparcl` and `aimsz-review`, the viewer now plots raw spectra by default. Use the `Downsample` toolbar toggle to enable pyqtgraph native downsampling and draw a black downsampled trace on top.
 For dual-arm Euclid parquet inputs passed via `--rgs-file` and `--bgs-file`, the viewer pairs rows by shared `extname` (or `objid` fallback), not by row index.
-When `--redshift-table` is provided, the viewer loads the external table once at startup, stores the matched value as `z_ref`, and uses startup precedence `z_vi > z_ref > z_temp > redshift`.
+When `--redshift-table` is provided, the viewer loads the external table once at startup and stores the matched value as `z_ref`; this remains an external overlay and is not part of the processed Euclid parquet priority list.
 
 #### Run a `PGSpecPlotThread` for visual inspection of a list of spectra
 ```python

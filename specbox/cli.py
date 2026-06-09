@@ -109,7 +109,12 @@ def viewer_cli() -> None:
     parser.add_argument("--spectra", default=None, help="Input FITS/parquet/list file path.")
     parser.add_argument("--spec-class", default="euclid", choices=sorted(_spec_class_map().keys()))
     parser.add_argument("--output-file", default=None, help="Output CSV for labels/history.")
-    parser.add_argument("--z-max", type=float, default=5.0)
+    parser.add_argument(
+        "--z-max",
+        type=float,
+        default=None,
+        help="Override viewer redshift upper bound (default: euclid=6.0, sparcl/aimsz-review=7.0, others=5.0).",
+    )
     parser.add_argument(
         "--load-history",
         dest="load_history",
