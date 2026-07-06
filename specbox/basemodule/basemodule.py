@@ -538,6 +538,7 @@ class SpecSparcl(SpecPandasRow):
     - arrays: ``wavelength``, ``flux``, ``ivar`` (+ optional ``mask``, ``model``)
     - scalars: ``ra``, ``dec``, ``redshift``, ``specid``, ``spectype``, ...
     """
+    REDSHIFT_PRIORITY = ("redshift", "z_desi", "z_sdss", "z_ref")
 
     def __init__(
         self,
@@ -569,6 +570,8 @@ class SpecSparcl(SpecPandasRow):
                 "ra",
                 "dec",
                 "redshift",
+                "z",
+                "z_vi",
                 "z_ref",
                 "z_desi",
                 "z_sdss",
@@ -596,19 +599,30 @@ class SpecSparcl(SpecPandasRow):
         self.sparcl_id = self._coerce_id_value(getattr(self, "sparcl_id", None))
         self.targetid = self._coerce_id_value(getattr(self, "targetid", None))
         self.specid = self._coerce_id_value(getattr(self, "specid", None))
-        redshift_value = getattr(self, "redshift", None)
-        if redshift_value is None or (isinstance(redshift_value, (float, np.floating)) and not np.isfinite(redshift_value)):
-            for fallback_attr in ("z_desi", "z_sdss"):
+        self.redshift_source = "redshift" if self._is_usable_redshift(getattr(self, "redshift", None)) else None
+        if not self._is_usable_redshift(getattr(self, "redshift", None)):
+            for fallback_attr in ("z_desi", "z_sdss", "z_ref", "z"):
                 fallback_value = getattr(self, fallback_attr, None)
-                if fallback_value is None:
-                    continue
-                try:
-                    if pd.isna(fallback_value):
-                        continue
-                except Exception:
-                    pass
-                self.redshift = fallback_value
-                break
+                if self._is_usable_redshift(fallback_value):
+                    self.redshift = float(fallback_value)
+                    self.redshift_source = fallback_attr
+                    break
+        self.z_vi_source = None
+        self.z_vi_initial = None
+        if not self._is_usable_redshift(getattr(self, "z_vi", None)):
+            for attr in self.REDSHIFT_PRIORITY:
+                value = getattr(self, attr, None)
+                if self._is_usable_redshift(value):
+                    self.z_vi = float(value)
+                    self.z_vi_initial = float(value)
+                    self.z_vi_source = self.redshift_source if attr == "redshift" and self.redshift_source else attr
+                    break
+            if not hasattr(self, "z_vi"):
+                self.z_vi = 0.0
+        elif self._is_usable_redshift(getattr(self, "z_vi", None)):
+            self.z_vi = float(self.z_vi)
+            self.z_vi_initial = float(self.z_vi)
+            self.z_vi_source = "z_vi"
         self.objid = self._canonical_objid(
             sparcl_id=self.sparcl_id,
             targetid=self.targetid,
@@ -618,6 +632,14 @@ class SpecSparcl(SpecPandasRow):
         )
         if not hasattr(self, "review_source"):
             self.review_source = "sparcl"
+
+    @staticmethod
+    def _is_usable_redshift(value):
+        try:
+            value = float(value)
+        except Exception:
+            return False
+        return np.isfinite(value) and value > 0
 
     @staticmethod
     def _coerce_id_value(value):

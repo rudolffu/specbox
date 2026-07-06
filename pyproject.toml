@@ -1,13 +1,14 @@
 [build-system]
 requires = [
   "setuptools>=61",
+  "setuptools-scm[toml]>=8",
   "wheel"
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "specbox"
-version = "1.0.1"
+dynamic = ["version"]
 description = "A simple tool to manipulate and visualize UV/optical/NIR spectra for astronomical research."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -50,3 +51,7 @@ include = ["specbox*"]
 
 [tool.setuptools.package-data]
 specbox = ["data/**/*"]
+
+[tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "node-and-date"

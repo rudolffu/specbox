@@ -75,12 +75,13 @@ python -m pip install .
 ## Usage
 ### Command-line tools
 
-`specbox` installs four CLIs:
+`specbox` installs five CLIs:
 
 - `specbox-viewer`: launch the enhanced viewer
 - `specbox-coadd`: coadd Euclid BGS+RGS chunks
 - `specbox-euclid-parquet`: convert raw single-arm Euclid combined FITS to parquet
 - `specbox-pcf`: run template PCF redshift and write `Z_TEMP`
+- `specbox-merge-redshift-table`: merge external reference redshifts into spectra parquet files
 
 ```bash
 # Viewer (history auto-loads when output CSV already exists)
@@ -117,6 +118,16 @@ specbox-pcf --fits coadd/out_chunk_001.fits --enable-type2
 specbox-pcf --fits coadd/out_chunk_001.fits --ragn-dr1-only
 ```
 
+## Development and releases
+
+Package versions are derived from Git tags via `setuptools-scm`. Do not edit
+`specbox.__version__` or hard-code a version in `pyproject.toml`; at runtime,
+`specbox.__version__` is read from the installed package metadata.
+
+For a release, create and push a version tag such as `v1.0.2`, then publish a
+GitHub Release from that tag. The PyPI workflow builds from the release tag and
+uploads only when the GitHub Release is published, not when a tag is pushed.
+
 ### Main classes and functions
 The main classes and functions of specbox are:
 #### `basemodule.py`:
@@ -127,7 +138,7 @@ The main classes and functions of specbox are:
 - `SpecEuclid1dDual`: paired Euclid reader for BGS+RGS with overlap scaling and merged/coadd-ready outputs.
 - `SpecEuclidCoaddRow`: reader for dataframe/parquet rows containing coadded spectra arrays.
 - `SpecPandasRow`: generic reader for "table-of-spectra" files readable by pandas (parquet/csv/feather/...), where each row stores arrays (e.g. wavelength/flux/ivar).
-- `SpecSparcl`: SPARCL parquet/table reader (e.g., for file `sparcl_spectra.parquet`). Common metadata columns include `data_release`, `targetid`, and (optional) `euclid_object_id` for Euclid overlay.
+- `SpecSparcl`: SPARCL parquet/table reader (e.g., for file `sparcl_spectra.parquet`). Common metadata columns include `redshift`, `data_release`, `targetid`, and (optional) `euclid_object_id` for Euclid overlay.
 #### `qtmodule.py`:
 - `PGSpecPlot`: class to plot spectra in a `pyqtgraph` plot.
 - `PGSpecPlotApp`: class to create a `pyqtgraph` plot with a `QApplication` instance.
@@ -152,6 +163,11 @@ from specbox.basemodule import SpecSparcl
 sp1 = SpecSparcl("sparcl_spectra.parquet", ext=1)
 sp1.plot()
 ```
+
+Default SPARCL parquet files with a scalar `redshift` column initialize
+`sp1.redshift` and the viewer startup redshift `sp1.z_vi` from that value.
+If `redshift` is missing or non-finite, `SpecSparcl` falls back to positive
+finite `z_desi`, `z_sdss`, `z_ref`, then `z`.
 
 #### Reading Euclid spectra from parquet rows
 ```python

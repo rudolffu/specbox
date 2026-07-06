@@ -102,6 +102,12 @@ cd specbox
 python -m pip install .
 ```
 
+Package versions are derived from Git tags with `setuptools-scm`. Do not edit
+`specbox.__version__` or hard-code a package version in `pyproject.toml`; the
+runtime `__version__` comes from installed package metadata. PyPI upload runs
+only when a GitHub Release is published for a version tag, not when the tag is
+pushed.
+
 - **Project Structure:**  
   The visual inspection tool is part of the package `specbox` which contains:
   - `qtmodule/qtmodule_enhanced.py` – Main GUI code.
@@ -146,6 +152,12 @@ sp1 = SpecSparcl('outlier_sparcl_spectra.parquet', ext=1)  # ext is 1-based row 
 sp1.plot()
 ```
 
+Default SPARCL parquet files with scalar columns like `specid`, `redshift`,
+`ra`, `dec`, `targetid`, `flux`, `ivar`, and `wavelength` are read directly.
+The `redshift` value initializes both `SpecSparcl.redshift` and the viewer's
+startup `z_vi`; if it is missing or non-finite, positive finite `z_desi`,
+`z_sdss`, `z_ref`, then `z` are used as fallbacks.
+
 Parquet input requires either ``pyarrow`` or ``fastparquet`` to be installed.
 
 To run the visual inspection GUI directly on such a multi-row parquet file:
@@ -161,7 +173,6 @@ viewer = PGSpecPlotThreadEnhanced(
     # and the Euclid combined FITS uses that ID as `EXTNAME`.
     euclid_fits='COMBINED_EUCLID_SPECS.fits',
     output_file='sparcl_vi_results.csv',
-    z_max=6.0,
     load_history=True,
 )
 viewer.run()

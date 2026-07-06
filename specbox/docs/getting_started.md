@@ -61,11 +61,15 @@ viewer = PGSpecPlotThreadEnhanced(
     spectra="sparcl_spectra.parquet",
     SpecClass=SpecSparcl,
     output_file="sparcl_vi_results.csv",
-    z_max=6.0,
     load_history=True,
 )
 viewer.run()
 ```
+
+For default SPARCL parquet tables, the scalar `redshift` column initializes
+both `SpecSparcl.redshift` and the viewer startup `z_vi`. If `redshift` is
+missing or non-finite, positive finite `z_desi`, `z_sdss`, `z_ref`, then `z`
+are used as fallbacks.
 
 ## CLI quick start
 
@@ -91,7 +95,7 @@ Notes:
 - `aimsz-review` reads parquet rows directly using `wavelength`, `flux`, `ivar`, and `mask`.
 - Session CSVs use canonical string IDs like `aimsz:{object_id}` to make history loading stable.
 - `sparcl` and `aimsz-review` plot raw spectra by default; use the `Downsample` toolbar toggle for native pyqtgraph downsampling.
-- Dual-arm Euclid parquet viewer mode pairs BGS/RGS rows by shared `extname` (or `objid` fallback), not by row index.
+- Dual-arm Euclid viewer mode pairs BGS/RGS rows by source ID union, not by row index; rows with only one arm still load with the missing arm marked unavailable.
 - Processed Euclid parquet startup uses `z_vi > z_sdss > z_desi > z_hybrid > z_fusion > z_temp > z_pcf_best > z_gaia > z_phot`; external `z_ref` values from `--redshift-table` remain an overlay.
 
 ### Euclid coadd (BGS+RGS)
@@ -146,3 +150,19 @@ specbox-pcf --fits coadd/sz_ragn_dr1_coadd_chunk_001.fits --enable-type2
 # ragn_dr1 only (as type1)
 specbox-pcf --fits coadd/sz_ragn_dr1_coadd_chunk_001.fits --ragn-dr1-only
 ```
+
+## Development and releases
+
+Package versions are derived from Git tags with `setuptools-scm`. Do not edit
+`specbox.__version__` or hard-code a package version in `pyproject.toml`; the
+runtime `__version__` comes from installed package metadata.
+
+Release flow:
+
+```bash
+git tag v1.0.2
+git push origin v1.0.2
+```
+
+Then publish a GitHub Release for that tag. PyPI upload is intentionally tied
+to the GitHub Release publication event, not to tag pushes.
