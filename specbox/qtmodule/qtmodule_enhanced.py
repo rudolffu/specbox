@@ -67,6 +67,7 @@ _TEMPLATE_EMISSION_LINES = [
     ("C IV", 1549.06),
     ("C III]", 1908.73),
     ("Mg II", 2798.75),
+    ("[Ne V]", 3426.84),
     ("[O II]", 3728.48),
     ("Hβ", 4862.68),
     ("[O III]", 4960.30),
@@ -2183,7 +2184,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             return message
         if not (np.isfinite(ra) and np.isfinite(dec)):
             return message
-        return f"{message} RA: {ra:.6f} DEC: {dec:.6f}."
+        return f"{message} RA, DEC = {ra:.6f}, {dec:.6f}."
 
     def plot_next(self):
         """Plot next spectrum."""

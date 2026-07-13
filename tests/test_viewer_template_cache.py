@@ -127,3 +127,9 @@ def test_euclid_redshift_change_reuses_prepared_plot_data(tmp_path):
     assert plot.spec.z_vi == pytest.approx(1.5)
     assert "z_vi = 1.5000" in plot.spectrum_info_label.text()
     app.processEvents()
+
+
+def test_template_emission_lines_include_ne_v_3426():
+    from specbox.qtmodule.qtmodule_enhanced import _TEMPLATE_EMISSION_LINES
+
+    assert ("[Ne V]", 3426.84) in _TEMPLATE_EMISSION_LINES

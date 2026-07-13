@@ -21,7 +21,7 @@ def test_terminal_spectrum_message_includes_finite_coordinates():
 
     message = plot._format_terminal_spectrum_message(3, spec)
 
-    assert message == "Spectrum 3/12. RA: 1.234568 DEC: -2.345679."
+    assert message == "Spectrum 3/12. RA, DEC = 1.234568, -2.345679."
 
 
 def test_terminal_spectrum_message_omits_partial_coordinates():
