@@ -126,6 +126,10 @@ specbox-viewer --spectra parquet/sz_ragn_dr1_rgs_chunk_001_part001.parquet --spe
 specbox-viewer --spectra coadd/sz_ragn_dr1_coadd_chunk_001_part001.parquet --spec-class euclid-coadd
 ```
 
+Euclid parquet flux-like columns default to the raw archive scale of
+`1e-16 erg/s/cm^2/Angstrom`. Add a scalar `flux_scale` column to override this
+for already-scaled processed files.
+
 ### Merge an external redshift table into parquet
 
 ```bash

@@ -1404,6 +1404,7 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         "z_gaia",
         "z_phot",
     )
+    DEFAULT_PARQUET_FLUX_SCALE = 1e-16
 
     @staticmethod
     def _parse_scaled_unit(unit_text, default_unit):
@@ -1664,6 +1665,20 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         )
         return np.full(flux_shape, np.inf, dtype=float)
 
+    @classmethod
+    def _row_flux_scale(cls, row, df):
+        for col in ("flux_scale", "signal_scale", "fscale", "FSCALE"):
+            value = cls._row_scalar(row, df, col, None)
+            if value is None:
+                continue
+            try:
+                value = float(value)
+            except Exception:
+                continue
+            if np.isfinite(value) and value > 0:
+                return value, col
+        return cls.DEFAULT_PARQUET_FLUX_SCALE, "default_euclid_parquet"
+
     @staticmethod
     def _row_scalar(row, df, column, default=None):
         if column not in df.columns:
@@ -1712,6 +1727,11 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
             raise ValueError(
                 f"error and flux length mismatch: {err.shape[0]} vs {flux.shape[0]}"
             )
+        flux_scale, flux_scale_source = self._row_flux_scale(row, df)
+        self.flux_scale = flux_scale
+        self.flux_scale_source = flux_scale_source
+        flux = np.asarray(flux, dtype=float) * flux_scale
+        err = np.asarray(err, dtype=float) * flux_scale
         data_length = len(wave)
         wave, flux, err = self._apply_mask_and_clip(
             wave,

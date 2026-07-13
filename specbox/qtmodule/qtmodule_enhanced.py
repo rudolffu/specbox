@@ -1043,6 +1043,10 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self._observed_wmax = None
         self._annotation_wave = None
         self._annotation_flux = None
+        self._prepared_plot_key = None
+        self._prepared_plot_data = None
+        self._prepared_plot_generation = 0
+        self._template_items = []
         self._view_lock_active = False
         self._locked_view_range = None
         self._suspend_view_lock_updates = False
@@ -1564,14 +1568,133 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         finally:
             self._suspend_view_lock_updates = False
 
+    def _current_prepared_plot_key(self, spec=None):
+        spec = self.spec if spec is None and hasattr(self, "spec") else spec
+        if spec is None:
+            return None
+        return (
+            id(spec),
+            getattr(spec, "objid", None),
+            getattr(spec, "filename", None),
+            getattr(spec, "_row", None),
+            self.spec_dual is not None,
+        )
+
+    def _store_prepared_plot_data(self, is_sparcl=False):
+        self._prepared_plot_key = self._current_prepared_plot_key()
+        self._prepared_plot_data = {
+            "wave": np.asarray(getattr(self, "wave", []), dtype=float).copy(),
+            "flux": np.asarray(getattr(self, "flux", []), dtype=float).copy(),
+            "annotation_wave": None if self._annotation_wave is None else np.asarray(self._annotation_wave, dtype=float).copy(),
+            "annotation_flux": None if self._annotation_flux is None else np.asarray(self._annotation_flux, dtype=float).copy(),
+            "observed_wmin": self._observed_wmin,
+            "observed_wmax": self._observed_wmax,
+            "is_sparcl": bool(is_sparcl),
+            "sparcl_y_range": self._compute_sparcl_y_range(self._annotation_flux if self._annotation_flux is not None else getattr(self, "flux", None))
+            if is_sparcl else None,
+        }
+        self._prepared_plot_generation += 1
+
+    def _restore_prepared_plot_data(self):
+        data = self._prepared_plot_data
+        if data is None or self._prepared_plot_key != self._current_prepared_plot_key():
+            return False
+        self.wave = data["wave"]
+        self.flux = data["flux"]
+        self._annotation_wave = data["annotation_wave"]
+        self._annotation_flux = data["annotation_flux"]
+        self._observed_wmin = data["observed_wmin"]
+        self._observed_wmax = data["observed_wmax"]
+        return True
+
+    @staticmethod
+    def _compute_sparcl_y_range(flux_arr):
+        if flux_arr is None:
+            return None
+        flux_ref = np.asarray(flux_arr, dtype=float)
+        finite_flux = flux_ref[np.isfinite(flux_ref)]
+        if finite_flux.size == 0:
+            return None
+        y1, y2 = np.percentile(finite_flux, [0.01, 99.99])
+        ymin = y1 - 0.05 * (y2 - y1)
+        ymax = y2 + 0.05 * (y2 - y1)
+        if ymin == ymax:
+            pad = abs(ymin) * 0.1 if ymin != 0 else 1.0
+            ymin -= pad
+            ymax += pad
+        return float(ymin), float(ymax)
+
+    def _clear_template_items(self):
+        for item in list(getattr(self, "_template_items", [])):
+            try:
+                self.removeItem(item)
+            except Exception:
+                pass
+        self._template_items = []
+
+    def _add_template_item(self, item):
+        if item is not None:
+            self._template_items.append(item)
+        return item
+
+    def _plot_template_items(self):
+        self._clear_template_items()
+        template = self.template_manager.get_template(self.template_manager.current_template)
+        if template is None:
+            return False
+
+        z_vi = getattr(self.spec, 'z_vi', getattr(self.spec, 'redshift', 0.0))
+        if z_vi is None:
+            z_vi = 0.0
+        wave_temp = template['wave'] * (1 + z_vi)
+        flux_temp = template['flux']
+
+        if self._observed_wmin is not None and self._observed_wmax is not None:
+            wmin = float(self._observed_wmin)
+            wmax = float(self._observed_wmax)
+        else:
+            wave = np.asarray(getattr(self, "wave", []), dtype=float)
+            flux = np.asarray(getattr(self, "flux", []), dtype=float)
+            finite = np.isfinite(wave) & np.isfinite(flux)
+            if np.any(finite):
+                wmin = float(np.nanmin(wave[finite]))
+                wmax = float(np.nanmax(wave[finite]))
+            elif wave.size > 0:
+                wmin = float(np.nanmin(wave))
+                wmax = float(np.nanmax(wave))
+            else:
+                return False
+        idx = (wave_temp >= wmin) & (wave_temp <= wmax)
+        wave_temp = wave_temp[idx]
+        flux_temp = flux_temp[idx]
+
+        if wave_temp.size == 0 or not np.isfinite(np.mean(flux_temp)) or np.mean(flux_temp) == 0:
+            return False
+
+        ref_flux = self.flux if hasattr(self, "flux") and self.flux is not None and len(self.flux) > 0 else flux_temp
+        flux_temp_scaled = flux_temp / np.mean(flux_temp) * np.abs(np.nanmean(ref_flux)) * 1.5
+        self._add_template_item(
+            self.plot(wave_temp, flux_temp_scaled, pen=pg.mkPen(_TEMPLATE_COLOR, width=2), antialias=True)
+        )
+        self._label_template_emission_lines(wmin=wmin, wmax=wmax, z=z_vi)
+        return True
+
+    def _redraw_template_only(self):
+        if not self._restore_prepared_plot_data():
+            return False
+        self._plot_template_items()
+        self.update_spectrum_info_label()
+        return True
+
     def slider_changed(self, slider_value):
         z = np.exp(self.base_z_step * slider_value) * (1+self.z_min) - 1
         self.spec.z_vi = z
         self.redshiftSpin.blockSignals(True)
         self.redshiftSpin.setValue(z)
         self.redshiftSpin.blockSignals(False)
-        self.clear()
-        self.plot_single(preserve_view=self._view_lock_active)
+        if not self._redraw_template_only():
+            self.clear()
+            self.plot_single(preserve_view=self._view_lock_active)
 
     def spin_changed(self, z_value):
         self.spec.z_vi = z_value
@@ -1579,8 +1702,9 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self.slider.blockSignals(True)
         self.slider.setValue(slider_value)
         self.slider.blockSignals(False)
-        self.clear()
-        self.plot_single(preserve_view=self._view_lock_active)
+        if not self._redraw_template_only():
+            self.clear()
+            self.plot_single(preserve_view=self._view_lock_active)
 
     def plot_single(self, preserve_view=False):
         """Plot the spectrum without template."""
@@ -1589,6 +1713,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         is_sparcl = self._is_sparcl_like_spec(spec)
         is_euclid = getattr(spec, 'telescope', '').lower() == 'euclid'
         is_euclid_dual = dual is not None
+        self._clear_template_items()
         self._observed_wmin = None
         self._observed_wmax = None
         self._annotation_wave = None
@@ -1796,40 +1921,8 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             wave_unit_str = f'Wavelength ({spec.wave_unit})'
 
         
-        # Plot template and always clip it to the observed wavelength span.
-        template = self.template_manager.get_template(self.template_manager.current_template)
-        if template is not None:
-            z_vi = getattr(spec, 'z_vi', getattr(spec, 'redshift', 0.0))
-            # print(f"Plotting template '{self.template_manager.current_template}' with z_vi={z_vi:.4f}")
-            if z_vi is None:
-                z_vi = 0.0
-            wave_temp = template['wave'] * (1 + z_vi)
-            flux_temp = template['flux']
-
-            if self._observed_wmin is not None and self._observed_wmax is not None:
-                wmin = float(self._observed_wmin)
-                wmax = float(self._observed_wmax)
-            else:
-                finite = np.isfinite(wave) & np.isfinite(flux)
-                if np.any(finite):
-                    wmin = float(np.nanmin(wave[finite]))
-                    wmax = float(np.nanmax(wave[finite]))
-                else:
-                    wmin = float(np.nanmin(wave))
-                    wmax = float(np.nanmax(wave))
-            idx = (wave_temp >= wmin) & (wave_temp <= wmax)
-            wave_temp = wave_temp[idx]
-            flux_temp = flux_temp[idx]
-
-            if wave_temp.size > 0 and np.isfinite(np.mean(flux_temp)) and np.mean(flux_temp) != 0:
-                ref_flux = self.flux if hasattr(self, "flux") and self.flux is not None and len(self.flux) > 0 else flux_temp
-                flux_temp_scaled = flux_temp / np.mean(flux_temp) * np.abs(np.nanmean(ref_flux)) * 1.5
-                self.plot(wave_temp, flux_temp_scaled, pen=pg.mkPen(_TEMPLATE_COLOR, width=2), antialias=True)
-                self._label_template_emission_lines(
-                    wmin=wmin,
-                    wmax=wmax,
-                    z=z_vi,
-                )
+        self._store_prepared_plot_data(is_sparcl=is_sparcl)
+        self._plot_template_items()
 
         self.setLabel('left', flux_unit_str)
         self.setLabel('bottom', wave_unit_str)
@@ -1862,20 +1955,21 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                 self.enableAutoRange(axis='y', enable=False)
                 self.setYRange(float(fixed_zero_ylim[0]), float(fixed_zero_ylim[1]), padding=0.0)
             elif is_sparcl:
-                flux_ref = np.asarray(getattr(self, 'flux', []), dtype=float)
-                finite_flux = flux_ref[np.isfinite(flux_ref)]
-                if finite_flux.size > 0:
+                cached_y_range = None
+                if self._prepared_plot_data is not None and self._prepared_plot_key == self._current_prepared_plot_key():
+                    cached_y_range = self._prepared_plot_data.get("sparcl_y_range")
+                if cached_y_range is not None:
                     self.enableAutoRange(axis='y', enable=False)
-                    y1, y2 = np.percentile(finite_flux, [0.01, 99.99])
-                    ymin = y1 - 0.05 * (y2 - y1)
-                    ymax = y2 + 0.05 * (y2 - y1)
-                    if ymin == ymax:
-                        pad = abs(ymin) * 0.1 if ymin != 0 else 1.0
-                        ymin -= pad
-                        ymax += pad
+                    ymin, ymax = cached_y_range
                     self.setYRange(ymin, ymax, padding=0.05)
                 else:
-                    self.enableAutoRange(axis='y', enable=True)
+                    y_range = self._compute_sparcl_y_range(getattr(self, 'flux', None))
+                    if y_range is not None:
+                        self.enableAutoRange(axis='y', enable=False)
+                        ymin, ymax = y_range
+                        self.setYRange(ymin, ymax, padding=0.05)
+                    else:
+                        self.enableAutoRange(axis='y', enable=True)
             else:
                 self.enableAutoRange(axis='y', enable=True)
         finally:
@@ -2000,56 +2094,9 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
 
     def plot_template(self):
         """Plot template with current redshift."""
-        template = self.template_manager.get_template(self.template_manager.current_template)
-        if template is None:
-            return
-            
-        z = getattr(self.spec, 'z_vi', getattr(self.spec, 'redshift', 0.0))
-        if z is None:
-            z = 0.0
-        wave_shifted = template['wave'] * (1 + z)
-        flux_template = template['flux']
-
-        if self._observed_wmin is not None and self._observed_wmax is not None:
-            wmin = float(self._observed_wmin)
-            wmax = float(self._observed_wmax)
-        else:
-            wave_full = self.spec.wave.value if hasattr(self.spec.wave, 'value') else self.spec.wave
-            flux_full = self.spec.flux.value if hasattr(self.spec.flux, 'value') else self.spec.flux
-            finite = np.isfinite(wave_full) & np.isfinite(flux_full)
-            if np.any(finite):
-                wmin = float(np.nanmin(wave_full[finite]))
-                wmax = float(np.nanmax(wave_full[finite]))
-            else:
-                wmin = float(np.nanmin(wave_full))
-                wmax = float(np.nanmax(wave_full))
-        idx = (wave_shifted >= wmin) & (wave_shifted <= wmax)
-        wave_shifted = wave_shifted[idx]
-        flux_template = flux_template[idx]
-
-        if wave_shifted.size == 0 or not np.isfinite(np.mean(flux_template)) or np.mean(flux_template) == 0:
-            return
-        
-        # Scale template like in original code (unclipped on both sides as requested)
-        if hasattr(self, 'flux') and len(self.flux) > 0:
-            # Use the cleaned flux from plot_single for scaling
-            flux_scaled = flux_template / np.mean(flux_template) * np.abs(self.flux.mean()) * 1.5
-        else:
-            # Fallback if cleaned flux not available
-            spec_flux = self.spec.flux.value if hasattr(self.spec.flux, 'value') else self.spec.flux
-            flux_scaled = flux_template / np.mean(flux_template) * np.abs(np.nanmean(spec_flux)) * 1.5
-        
-        # Plot template clipped to the observed wavelength range.
-        self.plot(wave_shifted, flux_scaled, pen=pg.mkPen(_TEMPLATE_COLOR, width=2), antialias=True)
-        if self._observed_wmin is not None and self._observed_wmax is not None:
-            self._label_template_emission_lines(wmin=self._observed_wmin, wmax=self._observed_wmax, z=z)
-        elif hasattr(self, 'wave') and self.wave is not None and len(self.wave) > 0:
-            self._label_template_emission_lines(wmin=float(np.nanmin(self.wave)), wmax=float(np.nanmax(self.wave)), z=z)
-        
-        # Update info label to reflect new redshift
-        self.update_spectrum_info_label()
-        
-        # Do NOT auto-range during template updates - preserves x-axis range
+        if not self._redraw_template_only():
+            self.clear()
+            self.plot_single(preserve_view=self._view_lock_active)
 
     def _load_euclid_overlay(self, euclid_object_id):
         if euclid_object_id is None:
@@ -2115,12 +2162,28 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             x = rest_aa * (1.0 + z)
             if x < wmin or x > wmax:
                 continue
-            self.addItem(pg.InfiniteLine(pos=x, angle=90, pen=pen, movable=False))
+            line = pg.InfiniteLine(pos=x, angle=90, pen=pen, movable=False)
+            self.addItem(line)
+            self._add_template_item(line)
             y = y_base * (1.0 - y_offsets[k % len(y_offsets)]) if y_base != 0 else 0.0
             label = pg.TextItem(text=str(name), color=text_color, anchor=(0.5, 1.0))
             label.setPos(x, y)
             self.addItem(label)
+            self._add_template_item(label)
             k += 1
+
+    def _format_terminal_spectrum_message(self, index_one_based, spec):
+        """Format the terminal progress message for a loaded spectrum."""
+        total = getattr(self, "len_list", "?")
+        message = f"Spectrum {index_one_based}/{total}."
+        try:
+            ra = float(getattr(spec, "ra"))
+            dec = float(getattr(spec, "dec"))
+        except Exception:
+            return message
+        if not (np.isfinite(ra) and np.isfinite(dec)):
+            return message
+        return f"{message} RA: {ra:.6f} DEC: {dec:.6f}."
 
     def plot_next(self):
         """Plot next spectrum."""
@@ -2151,6 +2214,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         
         # Set the display number before plotting (counter + 1 because we haven't incremented yet)
         self._displaying_spectrum_number = self.counter + 1
+        print(self._format_terminal_spectrum_message(self._displaying_spectrum_number, spec))
         self.plot_single()
         
         # Emit coordinate change signal for cutout loading
@@ -2190,6 +2254,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             
             # Set the display number before plotting (counter is correct after decrement)
             self._displaying_spectrum_number = self.counter
+            print(self._format_terminal_spectrum_message(self._displaying_spectrum_number, spec))
             self.plot_single()
             
             # Emit coordinate change signal for cutout loading
@@ -2229,6 +2294,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self.counter = index_one_based
         self.update_slider_and_spin()
         self._displaying_spectrum_number = index_one_based
+        print(self._format_terminal_spectrum_message(self._displaying_spectrum_number, spec))
         self.plot_single()
 
         if hasattr(self.spec, 'ra') and hasattr(self.spec, 'dec'):
@@ -2239,8 +2305,9 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         """Change current template."""
         if template_name in self.template_manager.get_available_templates():
             self.template_manager.current_template = template_name
-            self.clear()
-            self.plot_single()
+            if not self._redraw_template_only():
+                self.clear()
+                self.plot_single()
 
     def _annotate_at_wave(self, wave_pos):
         """Annotate the nearest plotted point to ``wave_pos``."""
@@ -2364,6 +2431,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                 # For reload, display number is current counter
                 self._displaying_spectrum_number = self.counter
                 self.update_slider_and_spin()
+                print(self._format_terminal_spectrum_message(self._displaying_spectrum_number, spec))
                 self.plot_single()
             elif event.key() == Qt.Key_Right:
                 self.clear()

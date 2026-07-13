@@ -216,6 +216,7 @@ specbox-viewer --spectra COMBINED_SPECS.fits --spec-class euclid
 
 Images and cutout downloads are off by default. Add `--images` to enable the image panel when needed, or `--no-images` for an explicit image-off CLI.
 For processed Euclid parquet files, viewer startup uses the first positive finite redshift in `z_vi > z_sdss > z_desi > z_hybrid > z_fusion > z_temp > z_pcf_best > z_gaia > z_phot`. `z_temp` and `z_pcf_best` are aliases, with `z_temp` preferred when both are present.
+Euclid parquet `flux`/`signal`, `err`, `var`, and `ivar` values default to the raw archive scale of `1e-16 erg/s/cm^2/Angstrom`; add a positive scalar `flux_scale` column (`signal_scale`, `fscale`, or `FSCALE` also work) when a parquet file uses a different numeric scale.
 With `--redshift-table`, the viewer loads the external table once at startup and stores the matched value as `z_ref`; this remains an external overlay and is not part of the processed Euclid parquet priority list.
 
 The first time you run the tool in a new Python environment, `matplotlib` will take some time to build the font cache. Subsequent runs will be faster.

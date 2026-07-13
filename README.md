@@ -183,6 +183,12 @@ can include redshift candidates; viewer startup uses the first positive finite
 value in `z_vi > z_sdss > z_desi > z_hybrid > z_fusion > z_temp > z_pcf_best >
 z_gaia > z_phot`. `z_temp` and `z_pcf_best` are treated as aliases, with
 `z_temp` preferred when both are present.
+Because raw Euclid archive parquet files do not record the numeric flux scale,
+`SpecEuclid1d` treats parquet `flux`/`signal`, `err`, `var`, and `ivar` values as
+being in units of `1e-16 erg/s/cm^2/Angstrom` by default. Add a positive scalar
+`flux_scale` column (`signal_scale`, `fscale`, or `FSCALE` also work) to override
+that default for files that already store physical flux values or use a different
+scale.
 
 #### Run the viewer on Euclid coadd parquet
 ```bash

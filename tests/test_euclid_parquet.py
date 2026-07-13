@@ -51,10 +51,12 @@ def test_euclid_archive_parquet_uses_var_when_err_missing(tmp_path):
     sp = SpecEuclid1d(str(path), ext=1, clip=False)
 
     assert np.allclose(sp.wave.value, [11900.0, 11913.4, 11926.8, 11940.2])
-    assert np.allclose(sp.flux.value, [1.0, 2.0, 3.0, 4.0])
-    assert np.allclose(sp.err[:2], [0.0, 2.0])
+    assert np.allclose(sp.flux.value, np.array([1.0, 2.0, 3.0, 4.0]) * 1e-16)
+    assert np.allclose(sp.err[:2], np.array([0.0, 2.0]) * 1e-16)
     assert np.isinf(sp.err[2])
     assert np.isinf(sp.err[3])
+    assert sp.flux_scale == pytest.approx(1e-16)
+    assert sp.flux_scale_source == "default_euclid_parquet"
     assert sp.objid == 1301699551666636977
     assert sp.object_id == 1301699551666636977
     assert sp.source_id == 1301699551666636977
@@ -86,11 +88,24 @@ def test_euclid_archive_parquet_good_pixels_filters_side_arrays(tmp_path):
     sp = SpecEuclid1d(str(path), ext=1, clip=False, good_pixels_only=True)
 
     assert np.allclose(sp.wave.value, [1.0, 4.0])
-    assert np.allclose(sp.flux.value, [10.0, 40.0])
-    assert np.allclose(sp.err, [1.0, 4.0])
+    assert np.allclose(sp.flux.value, np.array([10.0, 40.0]) * 1e-16)
+    assert np.allclose(sp.err, np.array([1.0, 4.0]) * 1e-16)
     assert np.array_equal(sp.mask, [0, 2])
     assert np.allclose(sp.quality, [0.1, 0.4])
     assert np.array_equal(sp.ndith, [1, 1])
+
+
+def test_euclid_parquet_flux_scale_override(tmp_path):
+    path = tmp_path / "euclid_archive.parquet"
+    df = _base_euclid_row(flux_scale=1.0)
+    _write_parquet_or_skip(df, path)
+
+    sp = SpecEuclid1d(str(path), ext=1, clip=False)
+
+    assert np.allclose(sp.flux.value, [10.0, 20.0, 30.0, 40.0])
+    assert np.allclose(sp.err, [1.0, 2.0, 3.0, 4.0])
+    assert sp.flux_scale == pytest.approx(1.0)
+    assert sp.flux_scale_source == "flux_scale"
 
 
 def test_euclid_processed_parquet_z_vi_wins_over_all_fallbacks(tmp_path):
