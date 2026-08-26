@@ -87,6 +87,9 @@ python -m pip install .
 # Viewer (history auto-loads when output CSV already exists)
 specbox-viewer --spectra your_spectra.fits --spec-class euclid
 
+# Recovery snapshots are written every 50 completed spectra to:
+# ./temp/<sample-name>/vi_temp_<count>.csv
+
 # Viewer with image panel / cutout downloads enabled explicitly
 specbox-viewer --spectra your_spectra.fits --spec-class euclid --images
 
@@ -117,6 +120,11 @@ specbox-pcf --fits coadd/out_chunk_001.fits --enable-type2
 # PCF with ragn_dr1 only (mapped to type1)
 specbox-pcf --fits coadd/out_chunk_001.fits --ragn-dr1-only
 ```
+
+Temporary recovery snapshots are cumulative and use a sample name derived from
+the input filename. Paired RGS/BGS inputs share a sample folder after the arm
+token is removed. Final and manual saves continue to use the configured viewer
+output CSV.
 
 ## Development and releases
 

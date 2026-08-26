@@ -332,6 +332,12 @@ When the tool is active, use the following keys:
 - **Saving Results:**  
   The tool saves classifications to the specified CSV file (with columns for object ID, object name, RA, DEC, assigned class, and visually inspected redshift `z_vi`) periodically and when exiting.
 
+- **Temporary Recovery Snapshots:**
+  Every 50 completed spectra, the viewer writes a cumulative snapshot to
+  `./temp/<sample-name>/vi_temp_<count>.csv`. The sample name comes from the
+  input filename; paired RGS/BGS files share a folder after the arm token is
+  removed. These snapshots do not replace the configured output CSV.
+
 - **Loading History:**  
   The tool reads the output CSV when it exists and loads object IDs into a dictionary. It then skips spectra that already exist in history, so you can resume where you left off.
 

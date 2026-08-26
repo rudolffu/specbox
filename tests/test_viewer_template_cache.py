@@ -133,3 +133,123 @@ def test_template_emission_lines_include_ne_v_3426():
     from specbox.qtmodule.qtmodule_enhanced import _TEMPLATE_EMISSION_LINES
 
     assert ("[Ne V]", 3426.84) in _TEMPLATE_EMISSION_LINES
+
+
+def test_line_marker_sets_redshift_and_reuses_prepared_plot_data(tmp_path):
+    from PySide6.QtWidgets import QApplication
+    from specbox.qtmodule.qtmodule_enhanced import PGSpecPlotEnhanced
+
+    path = tmp_path / "line-marker.parquet"
+    wave = np.linspace(3600.0, 9800.0, 96)
+    df = pd.DataFrame(
+        {
+            "targetid": [101],
+            "redshift": [0.2],
+            "ra": [10.0],
+            "dec": [20.0],
+            "wavelength": [wave],
+            "flux": [np.ones_like(wave)],
+            "ivar": [np.ones_like(wave)],
+        }
+    )
+    _write_parquet_or_skip(df, path)
+    app = QApplication.instance() or QApplication([])
+    plot = PGSpecPlotEnhanced(str(path), SpecClass=SpecSparcl)
+    generation = plot._prepared_plot_generation
+
+    plot.set_line_marker("[O III] 5008")
+    observed_wavelength = 5008.24 * 1.5
+
+    assert plot.apply_line_marker_at_wavelength(observed_wavelength)
+    assert plot.spec.z_vi == pytest.approx(0.5)
+    assert plot.redshiftSpin.value() == pytest.approx(0.5)
+    assert plot._prepared_plot_generation == generation
+    assert plot.active_line_marker == "[O III] 5008"
+    app.processEvents()
+
+
+def test_line_marker_modes_are_exclusive_and_escape_turns_mode_off(tmp_path):
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtWidgets import QApplication
+    from specbox.qtmodule.qtmodule_enhanced import PGSpecPlotEnhanced
+
+    path = tmp_path / "line-marker-modes.parquet"
+    wave = np.linspace(3600.0, 9800.0, 32)
+    df = pd.DataFrame(
+        {
+            "targetid": [101],
+            "redshift": [0.2],
+            "wavelength": [wave],
+            "flux": [np.ones_like(wave)],
+            "ivar": [np.ones_like(wave)],
+        }
+    )
+    _write_parquet_or_skip(df, path)
+    app = QApplication.instance() or QApplication([])
+    plot = PGSpecPlotEnhanced(str(path), SpecClass=SpecSparcl)
+
+    plot.set_line_marker("Hα")
+    plot.set_line_marker("Mg II")
+
+    assert plot.active_line_marker == "Mg II"
+
+    event = QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier)
+    plot.keyPressEvent(event)
+
+    assert plot.active_line_marker is None
+    app.processEvents()
+
+
+def test_spinbox_change_turns_line_marker_mode_off(tmp_path):
+    from PySide6.QtWidgets import QApplication
+    from specbox.qtmodule.qtmodule_enhanced import PGSpecPlotEnhanced
+
+    path = tmp_path / "line-marker-spinbox.parquet"
+    wave = np.linspace(3600.0, 9800.0, 32)
+    df = pd.DataFrame(
+        {
+            "targetid": [101],
+            "redshift": [0.2],
+            "wavelength": [wave],
+            "flux": [np.ones_like(wave)],
+            "ivar": [np.ones_like(wave)],
+        }
+    )
+    _write_parquet_or_skip(df, path)
+    app = QApplication.instance() or QApplication([])
+    plot = PGSpecPlotEnhanced(str(path), SpecClass=SpecSparcl)
+
+    plot.set_line_marker("Hα")
+    plot.spin_changed(0.4)
+
+    assert plot.active_line_marker is None
+    assert plot.spec.z_vi == pytest.approx(0.4)
+    app.processEvents()
+
+
+def test_line_marker_rejects_redshift_outside_viewer_range(tmp_path):
+    from PySide6.QtWidgets import QApplication
+    from specbox.qtmodule.qtmodule_enhanced import PGSpecPlotEnhanced
+
+    path = tmp_path / "line-marker-range.parquet"
+    wave = np.linspace(3600.0, 9800.0, 32)
+    df = pd.DataFrame(
+        {
+            "targetid": [101],
+            "redshift": [0.2],
+            "wavelength": [wave],
+            "flux": [np.ones_like(wave)],
+            "ivar": [np.ones_like(wave)],
+        }
+    )
+    _write_parquet_or_skip(df, path)
+    app = QApplication.instance() or QApplication([])
+    plot = PGSpecPlotEnhanced(str(path), SpecClass=SpecSparcl, z_max=1.0)
+    original_redshift = plot.spec.z_vi
+
+    plot.set_line_marker("Mg II")
+
+    assert not plot.apply_line_marker_at_wavelength(10000.0)
+    assert plot.spec.z_vi == pytest.approx(original_redshift)
+    app.processEvents()

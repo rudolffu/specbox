@@ -82,6 +82,13 @@ _TEMPLATE_EMISSION_LINES = [
     ("O I", 11290.0),
     ("Pa β", 12821.6),
 ]
+_LINE_MARKER_LINES = [
+    ("Hα", 6564.61),
+    ("[O III] 5008", 5008.24),
+    ("[O II] 3728", 3728.48),
+    ("Mg II", 2798.75),
+]
+_LINE_MARKER_WAVELENGTHS = dict(_LINE_MARKER_LINES)
 _TEMPLATE_COLOR = (220, 0, 0, 230)
 _CANONICAL_CLASS_TO_DISPLAY = {
     "QSO_DEFAULT": "QSO(Default)",
@@ -113,6 +120,48 @@ _CLASS_LABEL_ALIASES = {
     "UNKNOWN": "UNKNOWN",
     "BAD": "BAD",
 }
+
+
+def _sanitize_vi_sample_name(value):
+    """Return a filesystem-safe ASCII name for a VI sample."""
+    text = str(value or "").encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^0-9A-Za-z._-]+", "_", text)
+    return text.strip("._-") or "spectra"
+
+
+def _stem_without_arm_token(path):
+    """Normalize a filename stem after removing standalone arm tokens."""
+    tokens = re.split(r"[._-]+", Path(str(path)).stem)
+    tokens = [token for token in tokens if token.lower() not in {"rgs", "bgs"}]
+    return _sanitize_vi_sample_name("_".join(tokens))
+
+
+def _vi_history_sample_name(spectra, rgs_file=None, bgs_file=None):
+    """Derive a stable sample folder name from viewer inputs."""
+    if rgs_file and bgs_file:
+        rgs_sample = _stem_without_arm_token(rgs_file)
+        bgs_sample = _stem_without_arm_token(bgs_file)
+        if rgs_sample == bgs_sample:
+            return rgs_sample
+        rgs_stem = _sanitize_vi_sample_name(Path(str(rgs_file)).stem)
+        bgs_stem = _sanitize_vi_sample_name(Path(str(bgs_file)).stem)
+        return _sanitize_vi_sample_name(f"{rgs_stem}__{bgs_stem}")
+
+    if isinstance(spectra, (list, tuple)):
+        if not spectra:
+            return "spectra_list"
+        try:
+            parent_paths = [str(Path(str(path)).parent) for path in spectra]
+            common_parent = Path(os.path.commonpath(parent_paths)).name
+        except (TypeError, ValueError):
+            common_parent = ""
+        return (
+            _sanitize_vi_sample_name(common_parent)
+            if common_parent
+            else "spectra_list"
+        )
+
+    return _sanitize_vi_sample_name(Path(str(spectra)).stem)
 
 
 def normalize_class_label(value):
@@ -1012,6 +1061,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
     coordinate_changed = Signal(float, float)  # Signal for coordinate updates
     current_spec_changed = Signal()
     record_committed = Signal(object)
+    line_marker_mode_changed = Signal(object)
     
     def __init__(self, spectra, SpecClass=SpecEuclid1d, initial_counter=0,
                  z_max=None, history_dict=None, euclid_fits=None,
@@ -1048,6 +1098,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self._prepared_plot_data = None
         self._prepared_plot_generation = 0
         self._template_items = []
+        self.active_line_marker = None
         self._view_lock_active = False
         self._locked_view_range = None
         self._suspend_view_lock_updates = False
@@ -1097,6 +1148,13 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                     self.len_list = len(hdul) - 1
             self.speclist = None
 
+        sample_name = _vi_history_sample_name(
+            spectra,
+            rgs_file=self.dual_rgs_file,
+            bgs_file=self.dual_bgs_file,
+        )
+        self.vi_temp_dir = Path.cwd() / "temp" / sample_name
+
         if initial_counter >= self.len_list:
             print("No more spectra to plot.\n\t Plotting the first spectrum.")
             initial_counter = 0
@@ -1114,6 +1172,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self.vb = self.getViewBox()
         self.vb.setMouseMode(self.vb.RectMode)
         self.vb.sigRangeChangedManually.connect(self._on_manual_range_changed)
+        self.scene().sigMouseClicked.connect(self._on_line_marker_plot_clicked)
         self.z_min = 0.0
         self.z_max = z_max
         self.base_z_step = 0.001
@@ -1398,6 +1457,26 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                     }
                 )
         return rows
+
+    def _autosave_history(self, completed_count):
+        """Atomically save a cumulative temporary history snapshot."""
+        target = self.vi_temp_dir / f"vi_temp_{int(completed_count)}.csv"
+        pending = target.with_suffix(target.suffix + ".tmp")
+        try:
+            self.vi_temp_dir.mkdir(parents=True, exist_ok=True)
+            df_new = pd.DataFrame(self._history_rows_for_csv())
+            df_new.to_csv(pending, index=False)
+            os.replace(pending, target)
+        except Exception as exc:
+            try:
+                if pending.exists():
+                    pending.unlink()
+            except Exception:
+                pass
+            print(f"Failed to auto-save VI history to {target}: {exc}")
+            return None
+        print(f"VI history auto-saved to {target}")
+        return target
 
     # Copy all existing methods from original PGSpecPlot
     @staticmethod
@@ -1698,6 +1777,8 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             self.plot_single(preserve_view=self._view_lock_active)
 
     def spin_changed(self, z_value):
+        if self.active_line_marker is not None:
+            self.set_line_marker(None)
         self.spec.z_vi = z_value
         slider_value = int((1/self.base_z_step) * np.log((1+z_value)/(1+self.z_min)))
         self.slider.blockSignals(True)
@@ -1706,6 +1787,62 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         if not self._redraw_template_only():
             self.clear()
             self.plot_single(preserve_view=self._view_lock_active)
+
+    def set_line_marker(self, line_name=None):
+        """Activate one emission-line marker, or disable marker mode."""
+        if line_name is not None and line_name not in _LINE_MARKER_WAVELENGTHS:
+            raise ValueError(f"Unknown line marker: {line_name}")
+        if self.active_line_marker == line_name:
+            return
+        self.active_line_marker = line_name
+        if line_name is None:
+            self.unsetCursor()
+        else:
+            self.setCursor(Qt.CrossCursor)
+        self.line_marker_mode_changed.emit(line_name)
+
+    def apply_line_marker_at_wavelength(self, observed_wavelength):
+        """Set redshift by aligning the active rest-frame line to a wavelength."""
+        line_name = self.active_line_marker
+        if line_name is None:
+            return False
+        try:
+            observed_wavelength = float(observed_wavelength)
+        except (TypeError, ValueError):
+            return False
+        if not np.isfinite(observed_wavelength):
+            return False
+
+        rest_wavelength = _LINE_MARKER_WAVELENGTHS[line_name]
+        redshift = observed_wavelength / rest_wavelength - 1.0
+        if not np.isfinite(redshift) or redshift < self.z_min or redshift > self.z_max:
+            print(
+                f"Line marker {line_name}: wavelength {observed_wavelength:.2f} "
+                f"implies z={redshift:.4f}, outside [{self.z_min:.1f}, "
+                f"{self.z_max:.1f}]."
+            )
+            return False
+
+        self.spec.z_vi = redshift
+        self.update_slider_and_spin()
+        if not self._redraw_template_only():
+            self.clear()
+            self.plot_single(preserve_view=self._view_lock_active)
+        print(
+            f"Line marker {line_name}: wavelength {observed_wavelength:.2f}, "
+            f"z={redshift:.4f}."
+        )
+        return True
+
+    def _on_line_marker_plot_clicked(self, event):
+        if self.active_line_marker is None or event.button() != Qt.LeftButton:
+            return
+        scene_pos = event.scenePos()
+        if not self.vb.sceneBoundingRect().contains(scene_pos):
+            return
+        observed_wavelength = self.vb.mapSceneToView(scene_pos).x()
+        if self.apply_line_marker_at_wavelength(observed_wavelength):
+            event.accept()
 
     def plot_single(self, preserve_view=False):
         """Plot the spectrum without template."""
@@ -2335,6 +2472,11 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
 
     def keyPressEvent(self, event):
         """Handle keyboard events."""
+        if event.key() == Qt.Key_Escape:
+            self.set_line_marker(None)
+            event.accept()
+            return
+
         spec = self.spec
         self._last_committed_objid = None
 
@@ -2354,17 +2496,14 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                 _commit_current(self._default_class_token(), spec.z_vi)
             else:
                 _commit_current(None, spec.z_vi)
+            completed_count = self.counter
             if self.counter < self.len_list:
                 self.clear()
                 self.plot_next()
             else:
                 print("No more spectra to plot.")
-            # Temp save every 50 spectra like original
-            if (self.counter-1) % 50 == 0:
-                print("Saving temp file to csv (n={})...".format(self.counter))
-                temp_filename = f"vi_temp_{self.counter-1}.csv"
-                df_new = pd.DataFrame(self._history_rows_for_csv())
-                df_new.to_csv(temp_filename, index=False)
+            if completed_count % 50 == 0:
+                self._autosave_history(completed_count)
                 
         elif event.key() == Qt.Key_S:
             print("\tClass: STAR.")
@@ -2919,6 +3058,49 @@ class PGSpecPlotAppEnhanced(QApplication):
         self.plot.plot_single(preserve_view=self.plot._view_lock_active)
         self.plot.setFocus()
 
+    def _make_line_marker_controls(self):
+        marker_group = QGroupBox("Line marker")
+        marker_layout = QHBoxLayout()
+        marker_layout.setContentsMargins(8, 8, 8, 6)
+
+        self.line_marker_buttons = QButtonGroup(marker_group)
+        self.line_marker_buttons.setExclusive(True)
+        self.line_marker_button_by_name = {}
+
+        for line_name in [None] + [name for name, _wave in _LINE_MARKER_LINES]:
+            label = "Off" if line_name is None else line_name
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setMinimumHeight(36)
+            button.setMaximumHeight(40)
+            button.setFocusPolicy(Qt.NoFocus)
+            button.setToolTip(
+                "Disable line marker mode"
+                if line_name is None
+                else f"Align {line_name} with a clicked observed wavelength"
+            )
+            button.clicked.connect(
+                lambda checked, name=line_name:
+                self.plot.set_line_marker(name) if checked else None
+            )
+            self.line_marker_buttons.addButton(button)
+            self.line_marker_button_by_name[line_name] = button
+            marker_layout.addWidget(button)
+
+        self.line_marker_button_by_name[None].setChecked(True)
+        self.plot.line_marker_mode_changed.connect(
+            self._sync_line_marker_buttons
+        )
+        marker_group.setLayout(marker_layout)
+        marker_group.setMinimumHeight(68)
+        marker_group.setMaximumHeight(74)
+        return marker_group
+
+    def _sync_line_marker_buttons(self, line_name):
+        button = self.line_marker_button_by_name.get(line_name)
+        if button is not None:
+            button.setChecked(True)
+
     def make_layout(self):
         """Create the enhanced layout with image cutouts and controls."""
         layout = pg.LayoutWidget()
@@ -2929,18 +3111,21 @@ class PGSpecPlotAppEnhanced(QApplication):
             # Create toolbar with template controls and save buttons
             toolbar = QWidget()
             toolbar_layout = QHBoxLayout()
+            toolbar_layout.setContentsMargins(8, 6, 8, 4)
             
             # Template selection
             template_group = QGroupBox("Template")
-            template_group.setMaximumHeight(45)  # Make template group more compact
+            template_group.setMinimumHeight(62)
+            template_group.setMaximumHeight(68)
             template_layout = QHBoxLayout()
-            template_layout.setContentsMargins(5, 2, 5, 2)  # Reduce margins
+            template_layout.setContentsMargins(8, 7, 8, 5)
             
             self.template_buttons = QButtonGroup()
             template_names = self.plot.template_manager.get_available_templates()
             
             for i, template_name in enumerate(template_names):
                 btn = QRadioButton(template_name)
+                btn.setMinimumHeight(32)
                 if template_name == "Type 1":
                     btn.setChecked(True)
                 btn.clicked.connect(lambda checked, name=template_name: 
@@ -2955,11 +3140,13 @@ class PGSpecPlotAppEnhanced(QApplication):
                 self.image_toggle_btn = QPushButton("Hide Images")
                 self.image_toggle_btn.clicked.connect(self.toggle_image_panel)
                 self.image_toggle_btn.setCheckable(True)
-                self.image_toggle_btn.setMaximumHeight(35)  # Make button more compact
+                self.image_toggle_btn.setMinimumHeight(36)
+                self.image_toggle_btn.setMaximumHeight(40)
                 toolbar_layout.addWidget(self.image_toggle_btn)
 
             self.downsample_toggle = QCheckBox("Downsample (n=3)")
-            self.downsample_toggle.setMaximumHeight(35)
+            self.downsample_toggle.setMinimumHeight(32)
+            self.downsample_toggle.setMaximumHeight(40)
             self.downsample_toggle.setToolTip(
                 "Use pyqtgraph native downsampling for SPARCL/AIMS-z spectra "
                 "(mean + auto + clip-to-view)."
@@ -2972,13 +3159,15 @@ class PGSpecPlotAppEnhanced(QApplication):
             self.goto_index_spin.setMinimum(1)
             self.goto_index_spin.setMaximum(self.len_list)
             self.goto_index_spin.setValue(1)
-            self.goto_index_spin.setMaximumHeight(35)
+            self.goto_index_spin.setMinimumHeight(36)
+            self.goto_index_spin.setMaximumHeight(40)
             # Avoid stealing keyboard navigation shortcuts on startup.
             self.goto_index_spin.setFocusPolicy(Qt.ClickFocus)
             toolbar_layout.addWidget(self.goto_index_spin)
 
             self.goto_index_btn = QPushButton("Go")
-            self.goto_index_btn.setMaximumHeight(35)
+            self.goto_index_btn.setMinimumHeight(36)
+            self.goto_index_btn.setMaximumHeight(40)
             self.goto_index_btn.clicked.connect(self.go_to_index)
             toolbar_layout.addWidget(self.goto_index_btn)
             
@@ -2988,22 +3177,25 @@ class PGSpecPlotAppEnhanced(QApplication):
             # Save buttons
             self.save_png_btn = QPushButton("Save PNG")
             self.save_png_btn.clicked.connect(self.save_png)
-            self.save_png_btn.setMaximumHeight(35)
+            self.save_png_btn.setMinimumHeight(36)
+            self.save_png_btn.setMaximumHeight(40)
             toolbar_layout.addWidget(self.save_png_btn)
 
             self.save_btn = QPushButton("Save")
             self.save_btn.clicked.connect(self.save_data)
-            self.save_btn.setMaximumHeight(35)  # Make button more compact
+            self.save_btn.setMinimumHeight(36)
+            self.save_btn.setMaximumHeight(40)
             toolbar_layout.addWidget(self.save_btn)
             
             self.save_quit_btn = QPushButton("Save & Quit")
             self.save_quit_btn.clicked.connect(self.save_and_quit)
-            self.save_quit_btn.setMaximumHeight(35)  # Make button more compact
+            self.save_quit_btn.setMinimumHeight(36)
+            self.save_quit_btn.setMaximumHeight(40)
             toolbar_layout.addWidget(self.save_quit_btn)
             
             toolbar.setLayout(toolbar_layout)
-            toolbar.setMaximumHeight(50)  # Limit toolbar height
-            toolbar.setMinimumHeight(40)  # Set minimum height
+            toolbar.setMinimumHeight(78)
+            toolbar.setMaximumHeight(84)
             layout.addWidget(toolbar, row=0, col=0, colspan=2)
             
             # Instructions with comprehensive keyboard shortcuts
@@ -3032,6 +3224,7 @@ class PGSpecPlotAppEnhanced(QApplication):
             
             # Add spectrum info label above plot
             left_layout.addWidget(self.plot.spectrum_info_label)
+            left_layout.addWidget(self._make_line_marker_controls())
             left_layout.addWidget(self.plot)
             
             # Redshift slider
