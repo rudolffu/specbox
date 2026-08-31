@@ -130,9 +130,13 @@ def test_euclid_redshift_change_reuses_prepared_plot_data(tmp_path):
 
 
 def test_template_emission_lines_include_ne_v_3426():
-    from specbox.qtmodule.qtmodule_enhanced import _TEMPLATE_EMISSION_LINES
+    from specbox.qtmodule.qtmodule_enhanced import (
+        _LINE_MARKER_LINES,
+        _TEMPLATE_EMISSION_LINES,
+    )
 
     assert ("[Ne V]", 3426.84) in _TEMPLATE_EMISSION_LINES
+    assert ("[S III] 9533", 9533.2) in _LINE_MARKER_LINES
 
 
 def test_line_marker_sets_redshift_and_reuses_prepared_plot_data(tmp_path):
