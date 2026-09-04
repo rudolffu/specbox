@@ -37,12 +37,14 @@ GPLv3. See `LICENSE`.
 - [`specutils`](https://specutils.readthedocs.io/en/stable/installation.html)
 - `matplotlib`
 - `pandas`
-- `pyarrow` or `fastparquet` (optional, for reading parquet spectra tables)
+- `pyarrow` (installed automatically for parquet support from 1.0.3)
 - `requests`
 - `pillow` (PIL)
 - `astroquery`
 
-It is recommended to set up an isolated environment before installing (choose either option A or B):
+Python >=3.9 is declared; Python 3.12 is recommended for WP9 inspection.
+Pip installs the dependencies. Set up an isolated environment for a new
+installation (choose either option A or B):
 
 ```bash
 # Option A: Python venv
@@ -53,7 +55,7 @@ python -m pip install --upgrade pip
 
 ```bash
 # Option B: conda
-conda create -n specbox python=3.13 -y
+conda create -n specbox python=3.12 -y
 conda activate specbox
 python -m pip install --upgrade pip
 ```
@@ -63,6 +65,35 @@ Install the stable release from PyPI (recommended):
 ```bash
 python -m pip install specbox
 ```
+
+To update, activate the same environment, close the viewer, then run:
+
+```bash
+python -m pip install --upgrade specbox
+python -m pip show specbox
+specbox-viewer --help
+```
+
+The WP9 workflow requires **1.0.3 or later once published**. Restart the viewer
+after upgrading. If the version remains old, compare `python -m pip --version`
+and `python -c "import sys; print(sys.executable)"` with the launcher path
+(`command -v specbox-viewer` on macOS/Linux, `where specbox-viewer` on Windows).
+
+### Inspecting an assigned batch
+
+Claim a batch and confirm it with Yuming, then download and extract the whole
+folder. Keep its script and parquet inputs together. In the activated environment:
+
+```bash
+cd /path/to/your/batch
+bash alias_001_review.sh
+```
+
+Finalize redshift and classification, press `Q` to commit and advance, and use
+`Save` regularly and `Save & Quit` at the end. Send the CSV named by the script's
+`--output-file` to Yuming on Slack or <yfu@strw.leidenuniv.nl>, with the batch ID
+and complete/partial status. See the [VI tutorial](https://specbox.readthedocs.io/en/latest/VITUTORIAL.html)
+for line markers, save/resume limitations, recovery, and Windows instructions.
 
 To install a pre-release/development version from source:
 
@@ -132,9 +163,12 @@ Package versions are derived from Git tags via `setuptools-scm`. Do not edit
 `specbox.__version__` or hard-code a version in `pyproject.toml`; at runtime,
 `specbox.__version__` is read from the installed package metadata.
 
-For a release, create and push a version tag such as `v1.0.2`, then publish a
+For a release, create and push a new version tag such as `v1.0.3`, then publish a
 GitHub Release from that tag. The PyPI workflow builds from the release tag and
 uploads only when the GitHub Release is published, not when a tag is pushed.
+
+See [release notes and checklist](specbox/docs/releases.md). Never move an
+existing release tag; validate tests, docs, and distributions before tagging.
 
 ### Main classes and functions
 The main classes and functions of specbox are:
@@ -192,8 +226,10 @@ value in `z_vi > z_sdss > z_desi > z_hybrid > z_fusion > z_temp > z_pcf_best >
 z_gaia > z_phot`. `z_temp` and `z_pcf_best` are treated as aliases, with
 `z_temp` preferred when both are present.
 Because raw Euclid archive parquet files do not record the numeric flux scale,
-`SpecEuclid1d` treats parquet `flux`/`signal`, `err`, `var`, and `ivar` values as
-being in units of `1e-16 erg/s/cm^2/Angstrom` by default. Add a positive scalar
+`SpecEuclid1d` scales `flux`/`signal` and `err` by
+`1e-16 erg/s/cm^2/Angstrom` by default. Variance has squared flux units and
+inverse variance has inverse-squared units; uncertainty is derived before
+applying the flux scale. Add a positive scalar
 `flux_scale` column (`signal_scale`, `fscale`, or `FSCALE` also work) to override
 that default for files that already store physical flux values or use a different
 scale.
@@ -205,10 +241,28 @@ specbox-viewer \
   --spec-class euclid-coadd
 ```
 
+#### Run the viewer in Euclid dual-arm mode
+```bash
+specbox-viewer \
+  --rgs-file dual_001_rgs.parquet \
+  --bgs-file dual_001_bgs.parquet \
+  --spec-class euclid \
+  --z-max 6.5 \
+  --no-images \
+  --output-file dual_001_vi_results.csv
+```
+
+Dual-arm mode opens the paired RGS and BGS spectra directly; it does not
+require or create a coadd. Parquet matching uses the first column present in
+both tables from `source_id`, `object_id`, `extname`, `objid`. The union of
+objects is inspected, including objects with only one available arm. Existing
+output history loads automatically; the starting index follows its row count,
+so inspect sequentially and check the index when resuming out-of-order work.
+
 Images and cutout downloads are off by default. Use `--images` to opt in, or `--no-images` for an explicit image-off command line.
 
 For `sparcl` and `aimsz-review`, the viewer now plots raw spectra by default. Use the `Downsample` toolbar toggle to enable pyqtgraph native downsampling and draw a black downsampled trace on top.
-For dual-arm Euclid parquet inputs passed via `--rgs-file` and `--bgs-file`, the viewer pairs rows by shared `extname` (or `objid` fallback), not by row index.
+For dual-arm Euclid parquet inputs, matching uses source identity as described above.
 When `--redshift-table` is provided, the viewer loads the external table once at startup and stores the matched value as `z_ref`; this remains an external overlay and is not part of the processed Euclid parquet priority list.
 
 #### Run a `PGSpecPlotThread` for visual inspection of a list of spectra

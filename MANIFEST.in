@@ -1,2 +1,5 @@
 recursive-include specbox/data *
+include scripts/check_release_versions.py
+include specbox/docs/releases.md
+include tests/test_release_versions.py
 global-exclude *.DS_Store

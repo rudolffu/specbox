@@ -35,6 +35,19 @@ jobs:
           python -m build --sdist --wheel
           python -m twine check dist/*
 
+      - name: Validate release versions
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: python scripts/check_release_versions.py dist "$RELEASE_TAG"
+
+      - name: Test release code with wheel dependencies
+        env:
+          QT_QPA_PLATFORM: offscreen
+          MPLCONFIGDIR: /tmp/specbox-matplotlib
+        run: |
+          python -m pip install dist/*.whl pytest
+          python -m pytest -q
+
       - name: Upload distributions
         uses: actions/upload-artifact@v4
         with:

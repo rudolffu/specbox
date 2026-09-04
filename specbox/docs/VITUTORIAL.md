@@ -1,6 +1,6 @@
 # Visual Inspection Tool for Quasar Spectra
 
-This repository provides a visual inspection tool for quasar spectra. The tool enables you to load FITS spectra, interactively adjust the redshift using a non‐linear slider and spin box, and classify each spectrum using simple keyboard shortcuts. It also supports loading previous inspection results from a CSV history file so that already inspected spectra are skipped.
+SpecBox displays FITS and parquet spectra, lets you adjust redshift with templates and line markers, and records visual classifications in a CSV file. Existing history can be loaded for continued inspection; see the resume limitations below.
 
 Online documentation (Read the Docs): https://specbox.readthedocs.io/en/latest/index.html
 
@@ -24,6 +24,7 @@ Citation:
 
 ## Table of Contents
 
+- [Teamwork Quick Start](#teamwork-quick-start)
 - [Prerequisites and Installation of specbox](#prerequisites-and-installation-of-specbox)
 - [Running the Tool](#running-the-tool)
 - [User Interface Overview](#user-interface-overview)
@@ -33,44 +34,33 @@ Citation:
 
 ---
 
+## Teamwork Quick Start
+
+Use SpecBox **1.0.3 or later** for this workflow once that release is published.
+Earlier PyPI versions do not include all the controls described here.
+
+1. Claim a batch in the assignment spreadsheet supplied in the invitation and confirm the assignment with Yuming before starting.
+2. Download and extract the entire batch folder. Keep its `.sh` script and all parquet inputs together, with their original filenames.
+3. Activate the Python environment where SpecBox is installed, upgrade it as below, then open a terminal in the batch folder:
+
+   ```bash
+   cd /path/to/your/batch
+   bash alias_001_review.sh
+   ```
+
+4. Inspect spectra sequentially. Adjust the redshift, choose a classification, and press `Q` to commit the current result and advance. Press `Save` regularly; finish with `Save & Quit`.
+5. Send the results CSV to Yuming on Slack or by email at <yfu@strw.leidenuniv.nl>. Include your batch ID and whether it is complete or partial. Partial batches are welcome.
+
+The output filename is set by `--output-file` in the batch script. Return that
+CSV, rather than the input parquet or a screenshot. Keep a local backup and
+report completion in the assignment spreadsheet. Do not edit object IDs or
+reorder input rows during a review session.
+
 ## Prerequisites and Installation of `specbox`
 
-- **Python Version:** Python 3  
-- **Dependencies:**  
-  Ensure that you have the following Python packages installed:
-  - PySide6
-  - pyqtgraph
-  - matplotlib
-  - numpy
-  - pandas
-  - astropy
-  - specutils
-  - requests
-  - pillow (PIL)
-  - astroquery
-
-You can create a new environment (e.g. `euclid`) and install the required packages using `conda`:
-
-```bash
-conda create -n euclid python=3.13
-conda activate euclid
-pip install PySide6 specutils pyqtgraph astropy pandas matplotlib requests pillow astroquery setuptools
-```
-
-
-<!-- ```bash
-conda create -n euclid pyqtgraph pyside6 specutils astropy -c conda-forge
-conda activate euclid
-```
-
-Using the command above, `pandas`, `matplotlib`, and `numpy` will be installed automatically. 
-
-Alternatively, you can install the packages using `pip`:
-```bash
-pip install PySide6 specutils pyqtgraph # install only the missing package(s)
-``` -->
-
-- **Installation:**  
+The package declares Python >=3.9; Python **3.12** is recommended for the
+campaign. Pip installs the dependencies, including `pyarrow` for parquet in
+version 1.0.3 onward. A desktop graphical session is required for the viewer.
 
 It is recommended to set up an isolated environment before installing (choose either option A or B):
 
@@ -83,7 +73,7 @@ python -m pip install --upgrade pip
 
 ```bash
 # Option B: conda
-conda create -n specbox python=3.13 -y
+conda create -n specbox python=3.12 -y
 conda activate specbox
 python -m pip install --upgrade pip
 ```
@@ -93,6 +83,23 @@ Install the stable release from PyPI (recommended):
 ```bash
 python -m pip install specbox
 ```
+
+### Upgrade an existing installation
+
+Activate the same environment used by the batch script, close any running
+viewer, then run:
+
+```bash
+python -m pip install --upgrade specbox
+python -m pip show specbox
+specbox-viewer --help
+```
+
+Check that the reported version is at least 1.0.3 once published, then restart
+the viewer. Upgrading does not update a running process. If an older version
+persists, check `python -c "import sys; print(sys.executable)"` and
+`python -m pip --version`; on macOS/Linux use `command -v specbox-viewer`, or
+`where specbox-viewer` on Windows, to locate the launcher in that environment.
 
 To install a pre-release/development version from source:
 
@@ -158,7 +165,7 @@ The `redshift` value initializes both `SpecSparcl.redshift` and the viewer's
 startup `z_vi`; if it is missing or non-finite, positive finite `z_desi`,
 `z_sdss`, `z_ref`, then `z` are used as fallbacks.
 
-Parquet input requires either ``pyarrow`` or ``fastparquet`` to be installed.
+Parquet input uses `pyarrow`, installed automatically with SpecBox 1.0.3 onward.
 
 To run the visual inspection GUI directly on such a multi-row parquet file:
 
@@ -214,9 +221,32 @@ Use the CLI:
 specbox-viewer --spectra COMBINED_SPECS.fits --spec-class euclid
 ```
 
+For direct dual-arm Euclid inspection, pass the RGS and BGS tables separately:
+
+```bash
+specbox-viewer \
+  --rgs-file dual_001_rgs.parquet \
+  --bgs-file dual_001_bgs.parquet \
+  --spec-class euclid \
+  --z-max 6.5 \
+  --no-images \
+  --output-file dual_001_vi_results.csv
+```
+
+Dual-arm mode displays both arms without a coadd. For parquet, the first column
+present in both tables from `source_id`, `object_id`, `extname`, `objid` is the
+matching key. The viewer uses the union of objects from both arms; an object
+with only one arm remains inspectable, with the other arm unavailable. FITS
+uses source/object identifiers from headers, falling back to extension names.
+Rerunning the command loads the output CSV; see the resume limitations below.
+
 Images and cutout downloads are off by default. Add `--images` to enable the image panel when needed, or `--no-images` for an explicit image-off CLI.
 For processed Euclid parquet files, viewer startup uses the first positive finite redshift in `z_vi > z_sdss > z_desi > z_hybrid > z_fusion > z_temp > z_pcf_best > z_gaia > z_phot`. `z_temp` and `z_pcf_best` are aliases, with `z_temp` preferred when both are present.
-Euclid parquet `flux`/`signal`, `err`, `var`, and `ivar` values default to the raw archive scale of `1e-16 erg/s/cm^2/Angstrom`; add a positive scalar `flux_scale` column (`signal_scale`, `fscale`, or `FSCALE` also work) when a parquet file uses a different numeric scale.
+For Euclid parquet, the default flux scale is `1e-16 erg/s/cm^2/Angstrom`.
+`flux`/`signal` and `err` use this scale; `var` has squared flux units and
+`ivar` inverse-squared units. The reader derives uncertainty before applying
+the flux scale. A positive scalar `flux_scale` (`signal_scale`, `fscale`, or
+`FSCALE`) overrides the default; use 1 for arrays already in physical units.
 With `--redshift-table`, the viewer loads the external table once at startup and stores the matched value as `z_ref`; this remains an external overlay and is not part of the processed Euclid parquet priority list.
 
 The first time you run the tool in a new Python environment, `matplotlib` will take some time to build the font cache. Subsequent runs will be faster.
@@ -224,7 +254,10 @@ The first time you run the tool in a new Python environment, `matplotlib` will t
 ### Parameter Explanation
 
 - **spectra:**  
-  The path to the FITS file containing the spectra.
+  The path to a single FITS or multi-row parquet spectra file.
+- **rgs_file / bgs_file:**
+  The paired Euclid RGS and BGS FITS or parquet inputs for direct dual-arm
+  inspection. Supply both instead of `spectra`; a coadd is not needed.
 - **output_file:**  
   The CSV file where inspection results (object classification and redshift) are saved. If omitted, viewer uses `vi_{input_file_name}_results.csv`.
 - **z_max:**  
@@ -256,7 +289,19 @@ The first time you run the tool in a new Python environment, `matplotlib` will t
 - **Spin Box:**  
   Next to the slider is a QDoubleSpinBox that shows the current redshift value. You can type a custom redshift here. Both controls are synchronized.
 
-### How the Slider Works
+### Line markers
+
+Choose one of `Hα`, `[O III] 5008`, `[O II] 3728`, `Mg II`, or `[S III] 9533`
+in the six-button row (including `Off`). A single left-click in the plot sets
+`z_vi = observed wavelength / rest wavelength - 1` and aligns the template.
+The sulfur marker uses rest wavelength 9533.2 Angstrom. Verify the identification
+against other features before committing a redshift.
+
+Mode defaults to `Off` and stays active for repeated clicks. Press `Esc`, select
+`Off`, or adjust the redshift spin box to exit. Slider changes do not exit the
+mode. Clicks implying redshifts outside the configured range are rejected.
+
+### Slider mapping
 
 The slider’s mapping is given by:
 
@@ -276,7 +321,7 @@ When the tool is active, use the following keys:
   Loads the next spectrum. If only **Q** is pressed, the default classification **QSO(Default)** will be adopted. If the user chooses other classifications (keys below), using **Q** is also needed to load the next spectrum. Saved history uses the canonical token `QSO_DEFAULT`.
   
 - **S:**  
-  Classifies the spectrum as **STAR** (sets redshift to 0).
+  Classifies the spectrum as **STAR**.
 
 - **G:**  
   Classifies the spectrum as **GALAXY**.
@@ -295,6 +340,8 @@ When the tool is active, use the following keys:
 
 - **U:**  
   Classifies the spectrum as **UNKNOWN**.
+
+- **D:** Classifies the spectrum as **BAD**.
 
 - **L:**  
   Classifies the spectrum as **LIKELY_Q**.
@@ -329,8 +376,20 @@ When the tool is active, use the following keys:
 
 ## History and Resuming Inspections
 
+`Q` commits the active `z_vi` to in-memory history and advances. An unclassified
+object receives `QSO_DEFAULT`; this is a default label, not an explicit QSO
+assessment. Choose the appropriate classification rather than accepting the
+default for uncertain spectra. `Save` and `Save & Quit` write committed history
+to the configured CSV. In Euclid mode, changing the slider or spin box alone
+does not update the saved record; press `Q` after finalizing the result.
+
+For the WP9 inspection, redshifts recorded for **STAR**, **UNKNOWN**, and **BAD**
+are not adopted in the analysis. Press `S`, `U`, or `D`, then `Q` to advance;
+there is no need to adjust or zero the redshift for these classifications.
+Arrow navigation does not commit subsequent redshift edits.
+
 - **Saving Results:**  
-  The tool saves classifications to the specified CSV file (with columns for object ID, object name, RA, DEC, assigned class, and visually inspected redshift `z_vi`) periodically and when exiting.
+  Use `Save` regularly and `Save & Quit` when finished. Normal exit writes committed history; a crash may lose edits since the last explicit save or recovery snapshot.
 
 - **Temporary Recovery Snapshots:**
   Every 50 completed spectra, the viewer writes a cumulative snapshot to
@@ -339,7 +398,33 @@ When the tool is active, use the following keys:
   removed. These snapshots do not replace the configured output CSV.
 
 - **Loading History:**  
-  The tool reads the output CSV when it exists and loads object IDs into a dictionary. It then skips spectra that already exist in history, so you can resume where you left off.
+  The CLI auto-loads an existing output CSV. The starting position is based on
+  its row count, not a search for every unreviewed object. Inspect sequentially
+  and check the displayed index after resuming, especially after reviewing out
+  of order. When the history count reaches the input length, the viewer starts
+  at the first spectrum again; that does not mean the saved history was lost.
+
+To recover after a crash, close the viewer and back up any existing output CSV.
+Copy the latest appropriate `temp/<sample-name>/vi_temp_<count>.csv` to the
+output filename specified by the batch script, then rerun that script. Check
+the restored index and results. Snapshots live under the directory from which
+the viewer was launched, and are not loaded automatically.
+
+## Troubleshooting
+
+- **Command not found or old version:** activate the installation environment
+  and check the Python/pip and launcher locations as described above.
+- **Missing parquet engine:** run `python -m pip install --upgrade specbox pyarrow`
+  in that environment and restart the viewer.
+- **Script will not execute:** use `bash alias_001_review.sh` from the extracted
+  batch directory; this does not require making the script executable. Confirm
+  all input files are present. `.sh` scripts require Bash. On Windows, run the
+  contained `specbox-viewer` command in your activated environment, replacing
+  Bash variables with actual quoted paths and adapting line continuations.
+- **Qt/display error:** run from a local desktop terminal, not a headless SSH
+  session. `--no-images` disables cutouts, not the GUI. Send Yuming the error
+  text, operating system, batch ID, and `python -m pip show specbox` output if
+  the problem persists.
 
 ---
 

@@ -12,6 +12,7 @@ getting_started
 spectrum_classes
 notebooks
 VITUTORIAL
+releases
 api/index
 ```
 

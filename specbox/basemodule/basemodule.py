@@ -682,6 +682,7 @@ class SpecAIMSZReview(SpecPandasRow):
     """Reader for AIMS-z review parquet spectra.
 
     Expected row schema:
+
     - arrays: ``wavelength``, ``flux``, ``ivar``, ``mask``
     - scalars: ``object_id``, ``targetid``, ``ra``, ``dec``, ``redshift``,
       ``spectype``, ``data_release``
@@ -1835,23 +1836,23 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
     def read(self, filename, ext=None, extname=None, clip=True, good_pixels_only=False, lrange=None, **kwargs):
         """
         Read the Euclid 1D spectrum.
+
         Parameters
         ----------
-
-            filename : str
-                Name of the Euclid spectrum file.
-            ext : int
-                Extension number of the spectrum.
-            extname : str
-                Extension name of the spectrum.
-            clip : bool
-                If True, clip the spectrum to the useful range.
-            good_pixels_only : bool
-                If True, keep only recommended pixels according to Euclid MASK flags.
-                Pixels are considered bad when ``MASK`` is odd or ``MASK >= 64``.
-            lrange : str, optional
-                Arm label used for clipping policy (e.g. ``'BGS'`` or ``'RGS'``).
-                If None, ``LRANGE`` is read from the HDU header.
+        filename : str
+            Name of the Euclid spectrum file.
+        ext : int
+            Extension number of the spectrum.
+        extname : str
+            Extension name of the spectrum.
+        clip : bool
+            If True, clip the spectrum to the useful range.
+        good_pixels_only : bool
+            If True, keep only recommended pixels according to Euclid MASK flags.
+            Pixels are considered bad when ``MASK`` is odd or ``MASK >= 64``.
+        lrange : str, optional
+            Arm label used for clipping policy (e.g. ``'BGS'`` or ``'RGS'``).
+            If None, ``LRANGE`` is read from the HDU header.
         """
         if self._is_dataframe_backed_path(filename):
             self.read_parquet(filename, ext=ext, extname=extname, clip=clip, good_pixels_only=good_pixels_only, lrange=lrange, **kwargs)
