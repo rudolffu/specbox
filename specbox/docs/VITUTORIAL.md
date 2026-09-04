@@ -1,26 +1,6 @@
 # Visual Inspection Tool for Quasar Spectra
 
-SpecBox displays FITS and parquet spectra, lets you adjust redshift with templates and line markers, and records visual classifications in a CSV file. Existing history can be loaded for continued inspection; see the resume limitations below.
-
-Online documentation (Read the Docs): https://specbox.readthedocs.io/en/latest/index.html
-
-Citation:
-```bibtex
-@software{fu_2026_18642758,
-  author       = {Fu, Yuming},
-  title        = {specbox: A simple tool to manipulate and visualize
-                   UV/optical/NIR spectra for astronomical research.
-                  },
-  month        = feb,
-  year         = 2026,
-  publisher    = {Zenodo},
-  version      = {v1.0.0},
-  doi          = {10.5281/zenodo.18642758},
-  url          = {https://doi.org/10.5281/zenodo.18642758},
-}
-```
-
----
+This guide focuses on Euclid DR1 spectra prepared in parquet files for better loading performance. Use `--spec-class euclid` for these inspection batches. SpecBox lets you adjust redshift with templates and line markers and record visual classifications in a CSV file. See the resume limitations below before continuing an existing session.
 
 ## Table of Contents
 
@@ -30,7 +10,9 @@ Citation:
 - [User Interface Overview](#user-interface-overview)
 - [Keyboard Shortcuts and Actions](#keyboard-shortcuts-and-actions)
 - [History and Resuming Inspections](#history-and-resuming-inspections)
+- [Troubleshooting](#troubleshooting)
 - [Tips for Effective Use](#tips-for-effective-use)
+- [Non-Euclid](#non-euclid)
 
 ---
 
@@ -39,7 +21,7 @@ Citation:
 Use SpecBox **1.0.3 or later** for this workflow once that release is published.
 Earlier PyPI versions do not include all the controls described here.
 
-1. Claim a batch in the assignment spreadsheet supplied in the invitation and confirm the assignment with Yuming before starting.
+1. Claim a batch in the assignment spreadsheet supplied in the invitation and confirm the assignment with the coordinator before starting.
 2. Download and extract the entire batch folder. Keep its `.sh` script and all parquet inputs together, with their original filenames.
 3. Activate the Python environment where SpecBox is installed, upgrade it as below, then open a terminal in the batch folder:
 
@@ -49,7 +31,7 @@ Earlier PyPI versions do not include all the controls described here.
    ```
 
 4. Inspect spectra sequentially. Adjust the redshift, choose a classification, and press `Q` to commit the current result and advance. Press `Save` regularly; finish with `Save & Quit`.
-5. Send the results CSV to Yuming on Slack or by email at <yfu@strw.leidenuniv.nl>. Include your batch ID and whether it is complete or partial. Partial batches are welcome.
+5. Send the results CSV to the coordinator using the contact channel supplied in the invitation. Include your batch ID and whether it is complete or partial. Partial batches are welcome.
 
 The output filename is set by `--output-file` in the batch script. Return that
 CSV, rather than the input parquet or a screenshot. Keep a local backup and
@@ -118,107 +100,19 @@ pushed.
 - **Project Structure:**  
   The visual inspection tool is part of the package `specbox` which contains:
   - `qtmodule/qtmodule_enhanced.py` – Main GUI code.
-  - `basemodule.py` – Contains classes (such as `SpecEuclid1d`) to read the FITS spectra.
+  - `basemodule.py` – Contains classes (such as `SpecEuclid1d`) to read the parquet spectra.
 
 ---
 
 ## Running the Tool
 
-### Test installation of `specbox`
+### Euclid DR1 parquet inspection
 
-To test the installation, you can run the following code snippet in a Python shell or script:
-
-```python
-import matplotlib.pyplot as plt
-from specbox.basemodule import SpecEuclid1d
-
-sp1 = SpecEuclid1d(
-    'COMBINED_SPECS.fits',
-    ext=1,
-    good_pixels_only=True,  # Keep only recommended bins from Euclid MASK flags
-)  # example path to the FITS file containing spectra
-
-sp1.plot()
-plt.show()
-```
-
-If the installation is successful, you should see a plot of the spectrum.
-
-Notes:
-- `SpecEuclid1d` exposes `mask`, `good_mask`, and `bad_mask` (when the `MASK` column is present).
-- `good_pixels_only=True` applies the Euclid recommendation to discard bins with odd `MASK` or `MASK >= 64`.
-
-### Reading SPARCL parquet spectra (dataframe-backed)
-
-If your spectra are stored in a table file (e.g. parquet) where each row is a spectrum and the row contains array columns like ``wavelength``, ``flux``, and ``ivar``, you can use ``SpecSparcl``:
-
-```python
-from specbox.basemodule import SpecSparcl
-
-sp1 = SpecSparcl('outlier_sparcl_spectra.parquet', ext=1)  # ext is 1-based row index
-sp1.plot()
-```
-
-Default SPARCL parquet files with scalar columns like `specid`, `redshift`,
-`ra`, `dec`, `targetid`, `flux`, `ivar`, and `wavelength` are read directly.
-The `redshift` value initializes both `SpecSparcl.redshift` and the viewer's
-startup `z_vi`; if it is missing or non-finite, positive finite `z_desi`,
-`z_sdss`, `z_ref`, then `z` are used as fallbacks.
-
-Parquet input uses `pyarrow`, installed automatically with SpecBox 1.0.3 onward.
-
-To run the visual inspection GUI directly on such a multi-row parquet file:
-
-```python
-from specbox.basemodule import SpecSparcl
-from specbox.qtmodule import PGSpecPlotThreadEnhanced
-
-viewer = PGSpecPlotThreadEnhanced(
-    spectra='outlier_sparcl_spectra.parquet',
-    SpecClass=SpecSparcl,
-    # Optional: overlay Euclid spectrum when the parquet has `euclid_object_id`
-    # and the Euclid combined FITS uses that ID as `EXTNAME`.
-    euclid_fits='COMBINED_EUCLID_SPECS.fits',
-    output_file='sparcl_vi_results.csv',
-    load_history=True,
-)
-viewer.run()
-```
-
-Notes:
-- The results CSV includes `targetid` and `data_release` when present in the input table.
-- Use the `Save PNG` button to save a screenshot to `./saved_pngs/`.
-
-### AIMS-z review parquet workflow
-
-Use `SpecAIMSZReview` for AIMS-z review bundles that include review metadata alongside the spectra:
-
-```python
-from specbox.basemodule import SpecAIMSZReview
-
-sp1 = SpecAIMSZReview('review_bundle_specbox.parquet', ext=1)
-sp1.plot()
-```
-
-To launch the reviewer UI directly:
+The coordinator has prepared the Euclid DR1 spectra as parquet tables for better
+loading performance. Prefer the supplied batch script; to launch directly, use:
 
 ```bash
-specbox-viewer --spectra review_bundle_specbox.parquet --spec-class aimsz-review
-```
-
-Notes:
-- `aimsz-review` uses canonical string history keys: `aimsz:{object_id}`.
-- Saved session CSV columns are: `objid,targetid,ra,dec,data_release,class_vi,z_vi,qa_flag,notes,reviewer,reviewed_at`.
-- Legacy labels such as `QSO(Default)` and `LIKELY` are normalized on load; saved output always uses canonical uppercase tokens.
-- `sparcl` and `aimsz-review` now show raw spectra by default; use the `Downsample` toolbar toggle to turn on native pyqtgraph downsampling.
-- Add `--redshift-table PATH --redshift-key object_id --redshift-column Z` to overlay an external reference-redshift catalog.
-
-### Running the Visual Inspection Tool
-
-Use the CLI:
-
-```bash
-specbox-viewer --spectra COMBINED_SPECS.fits --spec-class euclid
+specbox-viewer --spectra alias_001.parquet --spec-class euclid
 ```
 
 For direct dual-arm Euclid inspection, pass the RGS and BGS tables separately:
@@ -236,8 +130,7 @@ specbox-viewer \
 Dual-arm mode displays both arms without a coadd. For parquet, the first column
 present in both tables from `source_id`, `object_id`, `extname`, `objid` is the
 matching key. The viewer uses the union of objects from both arms; an object
-with only one arm remains inspectable, with the other arm unavailable. FITS
-uses source/object identifiers from headers, falling back to extension names.
+with only one arm remains inspectable, with the other arm unavailable.
 Rerunning the command loads the output CSV; see the resume limitations below.
 
 Images and cutout downloads are off by default. Add `--images` to enable the image panel when needed, or `--no-images` for an explicit image-off CLI.
@@ -254,9 +147,9 @@ The first time you run the tool in a new Python environment, `matplotlib` will t
 ### Parameter Explanation
 
 - **spectra:**  
-  The path to a single FITS or multi-row parquet spectra file.
+  The path to the multi-row Euclid parquet spectra file.
 - **rgs_file / bgs_file:**
-  The paired Euclid RGS and BGS FITS or parquet inputs for direct dual-arm
+  The paired Euclid RGS and BGS parquet inputs for direct dual-arm
   inspection. Supply both instead of `spectra`; a coadd is not needed.
 - **output_file:**  
   The CSV file where inspection results (object classification and redshift) are saved. If omitted, viewer uses `vi_{input_file_name}_results.csv`.
@@ -278,8 +171,6 @@ The first time you run the tool in a new Python environment, `matplotlib` will t
 
 - **Plot Area:**  
   The main window displays the current quasar spectrum.
-- **Downsample Toggle:**  
-  For `sparcl` and `aimsz-review`, a toolbar toggle enables native pyqtgraph downsampling. When enabled, the viewer draws a black downsampled trace on top of the current raw-data view logic.
 - **External Redshift Overlay:**  
   Add `--redshift-table`, `--redshift-key`, and `--redshift-column` to inject `z_ref` values from an external FITS/parquet/CSV catalog without modifying the original spectra files.
 - **Euclid processed parquet redshifts:**  
@@ -422,7 +313,7 @@ the viewer was launched, and are not loaded automatically.
   contained `specbox-viewer` command in your activated environment, replacing
   Bash variables with actual quoted paths and adapting line continuations.
 - **Qt/display error:** run from a local desktop terminal, not a headless SSH
-  session. `--no-images` disables cutouts, not the GUI. Send Yuming the error
+  session. `--no-images` disables cutouts, not the GUI. Send the coordinator the error
   text, operating system, batch ID, and `python -m pip show specbox` output if
   the problem persists.
 
@@ -441,3 +332,70 @@ the viewer was launched, and are not loaded automatically.
 
 - **Customization:**  
   You can modify parameter `z_max` in the script if your spectral redshift range differs.
+
+## Non-Euclid
+
+Euclid inspectors can skip this section. These readers are for SPARCL tables
+and AIMS-z review bundles and use different spectrum classes.
+
+### Reading SPARCL parquet spectra (dataframe-backed)
+
+If your spectra are stored in a table file (e.g. parquet) where each row is a spectrum and the row contains array columns like ``wavelength``, ``flux``, and ``ivar``, you can use ``SpecSparcl``:
+
+```python
+from specbox.basemodule import SpecSparcl
+
+sp1 = SpecSparcl('outlier_sparcl_spectra.parquet', ext=1)  # ext is 1-based row index
+sp1.plot()
+```
+
+Default SPARCL parquet files with scalar columns like `specid`, `redshift`,
+`ra`, `dec`, `targetid`, `flux`, `ivar`, and `wavelength` are read directly.
+The `redshift` value initializes both `SpecSparcl.redshift` and the viewer's
+startup `z_vi`; if it is missing or non-finite, positive finite `z_desi`,
+`z_sdss`, `z_ref`, then `z` are used as fallbacks.
+
+Parquet input uses `pyarrow`, installed automatically with SpecBox 1.0.3 onward.
+
+To run the visual inspection GUI directly on such a multi-row parquet file:
+
+```python
+from specbox.basemodule import SpecSparcl
+from specbox.qtmodule import PGSpecPlotThreadEnhanced
+
+viewer = PGSpecPlotThreadEnhanced(
+    spectra='outlier_sparcl_spectra.parquet',
+    SpecClass=SpecSparcl,
+    output_file='sparcl_vi_results.csv',
+    load_history=True,
+)
+viewer.run()
+```
+
+Notes:
+- The results CSV includes `targetid` and `data_release` when present in the input table.
+- Use the `Save PNG` button to save a screenshot to `./saved_pngs/`.
+
+### AIMS-z review parquet workflow
+
+Use `SpecAIMSZReview` for AIMS-z review bundles that include review metadata alongside the spectra:
+
+```python
+from specbox.basemodule import SpecAIMSZReview
+
+sp1 = SpecAIMSZReview('review_bundle_specbox.parquet', ext=1)
+sp1.plot()
+```
+
+To launch the reviewer UI directly:
+
+```bash
+specbox-viewer --spectra review_bundle_specbox.parquet --spec-class aimsz-review
+```
+
+Notes:
+- `aimsz-review` uses canonical string history keys: `aimsz:{object_id}`.
+- Saved session CSV columns are: `objid,targetid,ra,dec,data_release,class_vi,z_vi,qa_flag,notes,reviewer,reviewed_at`.
+- Legacy labels such as `QSO(Default)` and `LIKELY` are normalized on load; saved output always uses canonical uppercase tokens.
+- `sparcl` and `aimsz-review` now show raw spectra by default; use the `Downsample` toolbar toggle to turn on native pyqtgraph downsampling.
+- Add `--redshift-table PATH --redshift-key object_id --redshift-column Z` to overlay an external reference-redshift catalog.
