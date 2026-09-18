@@ -149,6 +149,11 @@ def viewer_cli() -> None:
     parser.add_argument("--redshift-table", default=None, help="Optional external table providing reference redshifts.")
     parser.add_argument("--redshift-key", default="object_id", help="Join key column/attribute used for external redshift lookup.")
     parser.add_argument("--redshift-column", default="Z", help="Redshift column in the external table.")
+    parser.add_argument(
+        "--initial-redshift-column", default=None,
+        help="For Euclid spectra Parquet, prefer this numeric column over z_hybrid for the initial redshift; "
+             "z_vi/z_sdss/z_desi retain priority when present.",
+    )
     args = parser.parse_args()
     if args.images and args.no_images:
         parser.error("Use either --images or --no-images, not both.")
@@ -156,6 +161,25 @@ def viewer_cli() -> None:
     from .qtmodule import PGSpecPlotThreadEnhanced
 
     spec_class = _spec_class_map()[args.spec_class]
+    if args.initial_redshift_column:
+        if spec_class is not SpecEuclid1d or args.rgs_file or args.bgs_file:
+            parser.error("--initial-redshift-column requires a single --spec-class euclid spectra Parquet")
+        if not SpecEuclid1d._is_dataframe_backed_path(args.spectra):
+            parser.error("--initial-redshift-column requires --spectra to be a Parquet file")
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        schema = pq.ParquetFile(args.spectra).schema_arrow
+        if args.initial_redshift_column not in schema.names:
+            parser.error(
+                f"Initial redshift column '{args.initial_redshift_column}' is absent from {args.spectra}"
+            )
+        column_type = schema.field(args.initial_redshift_column).type
+        if not (pa.types.is_integer(column_type) or pa.types.is_floating(column_type)
+                or pa.types.is_decimal(column_type)):
+            parser.error(
+                f"Initial redshift column '{args.initial_redshift_column}' must be numeric, got {column_type}"
+            )
     spectra = args.spectra
     if spectra is None:
         spectra = args.rgs_file if args.rgs_file else args.bgs_file
@@ -203,6 +227,7 @@ def viewer_cli() -> None:
         dual_good_pixels_only=args.dual_good_pixels_only,
         external_redshift_lookup=external_redshift_lookup,
         external_redshift_key=args.redshift_key,
+        initial_redshift_column=args.initial_redshift_column,
     )
     viewer.run()
 

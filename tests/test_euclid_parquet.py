@@ -193,6 +193,32 @@ def test_euclid_processed_parquet_late_priority_order(tmp_path):
         assert sp.z_vi_source == source
 
 
+def test_euclid_parquet_initial_redshift_column_precedes_hybrid_but_not_vi(tmp_path):
+    path = tmp_path / "euclid_processed.parquet"
+    df = _base_euclid_row(z_hybrid=1.2, segment_z_mode=2.3)
+    _write_parquet_or_skip(df, path)
+
+    sp = SpecEuclid1d(str(path), ext=1, clip=False, initial_redshift_column="segment_z_mode")
+    assert sp.z_vi == pytest.approx(2.3)
+    assert sp.z_vi_source == "segment_z_mode"
+    assert sp.z_hybrid == pytest.approx(1.2)
+
+    df = _base_euclid_row(z_hybrid=1.2, segment_z_mode=np.nan)
+    _write_parquet_or_skip(df, path)
+    sp = SpecEuclid1d(str(path), ext=1, clip=False, initial_redshift_column="segment_z_mode")
+    assert sp.z_vi == pytest.approx(1.2)
+    assert sp.z_vi_source == "z_hybrid"
+
+    df = _base_euclid_row(z_vi=0.4, z_hybrid=1.2, segment_z_mode=2.3)
+    _write_parquet_or_skip(df, path)
+    sp = SpecEuclid1d(str(path), ext=1, clip=False, initial_redshift_column="segment_z_mode")
+    assert sp.z_vi == pytest.approx(0.4)
+    assert sp.z_vi_source == "z_vi"
+
+    with pytest.raises(KeyError, match="Initial redshift column"):
+        SpecEuclid1d(str(path), ext=1, clip=False, initial_redshift_column="missing")
+
+
 def test_euclid_info_label_has_coordinates_and_compact_z_source(tmp_path):
     from PySide6.QtWidgets import QApplication
     from specbox.qtmodule.qtmodule_enhanced import PGSpecPlotEnhanced
@@ -221,6 +247,27 @@ def test_euclid_info_label_has_coordinates_and_compact_z_source(tmp_path):
     app.processEvents()
 
 
+def test_euclid_info_label_keeps_hybrid_beside_selected_initial_redshift(tmp_path):
+    from PySide6.QtWidgets import QApplication
+    from specbox.qtmodule.qtmodule_enhanced import PGSpecPlotEnhanced
+
+    path = tmp_path / "euclid_processed.parquet"
+    wave = np.linspace(11900.0, 19002.0, 531)
+    _write_parquet_or_skip(_base_euclid_row(
+        wavelength=wave, flux=np.ones_like(wave), var=np.ones_like(wave),
+        z_hybrid=1.23456, segment_z_mode=2.34567,
+    ), path)
+    app = QApplication.instance() or QApplication([])
+    plot = PGSpecPlotEnhanced(
+        str(path), SpecClass=SpecEuclid1d, initial_redshift_column="segment_z_mode"
+    )
+    text = plot.spectrum_info_label.text()
+    assert plot.spec.z_vi == pytest.approx(2.34567)
+    assert "z_source: segment_z_mode = 2.3457" in text
+    assert "z_hybrid = 1.2346" in text
+    app.processEvents()
+
+
 def test_viewer_default_z_max_by_spec_class():
     from specbox.basemodule import SpecAIMSZReview, SpecSparcl
     from specbox.qtmodule.qtmodule_enhanced import default_z_max_for_spec_class
@@ -228,3 +275,44 @@ def test_viewer_default_z_max_by_spec_class():
     assert default_z_max_for_spec_class(SpecEuclid1d) == 6.0
     assert default_z_max_for_spec_class(SpecSparcl) == 7.0
     assert default_z_max_for_spec_class(SpecAIMSZReview) == 7.0
+
+
+def test_viewer_cli_passes_initial_redshift_column_and_rejects_missing(tmp_path, monkeypatch):
+    import sys
+    from specbox import cli, qtmodule
+
+    path = tmp_path / "euclid_processed.parquet"
+    _write_parquet_or_skip(_base_euclid_row(
+        z_hybrid=1.2, segment_z_mode=2.3, review_channel="NN_only"
+    ), path)
+    captured = {}
+
+    class FakeViewer:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def run(self):
+            captured["ran"] = True
+
+    monkeypatch.setattr(qtmodule, "PGSpecPlotThreadEnhanced", FakeViewer)
+    monkeypatch.setattr(sys, "argv", [
+        "specbox-viewer", "--spectra", str(path), "--spec-class", "euclid",
+        "--initial-redshift-column", "segment_z_mode", "--no-images",
+    ])
+    cli.viewer_cli()
+    assert captured["initial_redshift_column"] == "segment_z_mode"
+    assert captured["ran"] is True
+
+    monkeypatch.setattr(sys, "argv", [
+        "specbox-viewer", "--spectra", str(path), "--spec-class", "euclid",
+        "--initial-redshift-column", "missing",
+    ])
+    with pytest.raises(SystemExit, match="2"):
+        cli.viewer_cli()
+
+    monkeypatch.setattr(sys, "argv", [
+        "specbox-viewer", "--spectra", str(path), "--spec-class", "euclid",
+        "--initial-redshift-column", "review_channel",
+    ])
+    with pytest.raises(SystemExit, match="2"):
+        cli.viewer_cli()

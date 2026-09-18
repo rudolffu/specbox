@@ -1696,6 +1696,13 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.z_vi_source = None
         self.z_vi_initial = None
         for attr in self.REDSHIFT_PRIORITY:
+            if attr == "z_hybrid" and self.initial_redshift_column:
+                preferred = getattr(self, "_preferred_redshift_value", None)
+                if self._is_usable_redshift(preferred):
+                    self.z_vi = float(preferred)
+                    self.z_vi_initial = float(preferred)
+                    self.z_vi_source = self.initial_redshift_column
+                    return self.z_vi
             value = getattr(self, attr, None)
             if self._is_usable_redshift(value):
                 self.z_vi = float(value)
@@ -1708,6 +1715,15 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         df = SpecPandasRow._read_dataframe_file(filename, file_format="parquet")
         idx = self._find_dataframe_row(df, ext=ext, extname=extname)
         row = df.iloc[idx]
+        self._preferred_redshift_value = None
+        if self.initial_redshift_column:
+            if self.initial_redshift_column not in df.columns:
+                raise KeyError(
+                    f"Initial redshift column '{self.initial_redshift_column}' is absent from {filename}"
+                )
+            self._preferred_redshift_value = self._row_scalar(
+                row, df, self.initial_redshift_column, None
+            )
 
         self.hdu = None
         self.data = None
@@ -1800,7 +1816,7 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         if "z_ref" in df.columns:
             self.z_ref = row.get("z_ref", None)
 
-    def __init__(self, filename=None, ext=None, extname=None, clip=True, good_pixels_only=False, redshift=None, lrange=None, *args, **kwargs):
+    def __init__(self, filename=None, ext=None, extname=None, clip=True, good_pixels_only=False, redshift=None, lrange=None, *args, initial_redshift_column=None, **kwargs):
         """
         Parameters
         ----------
@@ -1830,6 +1846,8 @@ class SpecEuclid1d(ConvenientSpecMixin, SpecIOMixin):
         self.telescope = 'Euclid'
         self.good_pixels_only = good_pixels_only
         self.lrange = lrange
+        self.initial_redshift_column = initial_redshift_column
+        self._preferred_redshift_value = None
         if filename is not None:
             self.read(filename, ext, extname, clip, good_pixels_only=good_pixels_only, lrange=lrange, **kwargs)
         

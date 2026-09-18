@@ -152,7 +152,7 @@ Notes:
 - Session CSVs use canonical string IDs like `aimsz:{object_id}` to make history loading stable.
 - `sparcl` and `aimsz-review` plot raw spectra by default; use the `Downsample` toolbar toggle for native pyqtgraph downsampling.
 - Dual-arm Euclid viewer mode pairs BGS/RGS rows by source ID union, not by row index; rows with only one arm still load with the missing arm marked unavailable.
-- Processed Euclid parquet startup uses `z_vi > z_sdss > z_desi > z_hybrid > z_fusion > z_temp > z_pcf_best > z_gaia > z_phot`; external `z_ref` values from `--redshift-table` remain an overlay.
+- Processed Euclid parquet startup uses `z_vi > z_sdss > z_desi > z_hybrid > z_fusion > z_temp > z_pcf_best > z_gaia > z_phot`; external `z_ref` values from `--redshift-table` remain an overlay. For a single Euclid spectra Parquet, `--initial-redshift-column NAME` inserts that numeric column just before `z_hybrid` when its row value is positive and finite. The message panel retains `z_hybrid` for comparison. This is separate from `--redshift-column`, which names a column in the external table.
 
 ### Euclid coadd (BGS+RGS)
 

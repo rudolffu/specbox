@@ -115,6 +115,20 @@ loading performance. Prefer the supplied batch script; to launch directly, use:
 specbox-viewer --spectra alias_001.parquet --spec-class euclid
 ```
 
+To start from another numeric column in a single Euclid spectra Parquet (for
+example, an NN redshift mode) while retaining `z_hybrid` in the message panel:
+
+```bash
+specbox-viewer --spectra suspicious_top200_rgs_spectra.parquet --spec-class euclid \
+  --initial-redshift-column segment_z_mode
+```
+
+The chosen column takes precedence over `z_hybrid` when its row value is
+positive and finite; `z_vi`, `z_sdss`, and `z_desi` still take precedence. If
+the chosen value is unusable for a row, normal fallback applies. A missing
+column is rejected at startup. `--redshift-column` instead names a column in
+an external `--redshift-table` and has not changed.
+
 For direct dual-arm Euclid inspection, pass the RGS and BGS tables separately:
 
 ```bash
@@ -155,6 +169,10 @@ The first time you run the tool in a new Python environment, `matplotlib` will t
   The CSV file where inspection results (object classification and redshift) are saved. If omitted, viewer uses `vi_{input_file_name}_results.csv`.
 - **z_max:**  
   The maximum redshift to be considered for the slider. Defaults are 6.0 for `euclid`, 7.0 for `sparcl`/`aimsz-review`, and 5.0 for other spectrum classes.
+- **initial-redshift-column:**
+  Optional numeric column in a single Euclid spectra Parquet to use ahead of
+  `z_hybrid` for the initial slider position. The message panel also shows
+  `z_hybrid` for comparison.
 - **load_history:**  
   Optional CLI flag to force history loading. By default, history is auto-loaded when the output CSV exists.
 - **no-images:**  

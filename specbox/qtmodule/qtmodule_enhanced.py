@@ -1068,7 +1068,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
                  z_max=None, history_dict=None, euclid_fits=None,
                  rgs_file=None, bgs_file=None, ext=None, extname=None,
                  dual_good_pixels_only=False, external_redshift_lookup=None,
-                 external_redshift_key="object_id"):
+                 external_redshift_key="object_id", initial_redshift_column=None):
         super().__init__()
         self.SpecClass = SpecClass
         if z_max is None:
@@ -1078,6 +1078,7 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
         self.euclid_fits = euclid_fits
         self.external_redshift_lookup = dict(external_redshift_lookup or {})
         self.external_redshift_key = str(external_redshift_key or "object_id")
+        self.initial_redshift_column = initial_redshift_column
         self._euclid_overlay_cache = {}
         self.dual_rgs_file = rgs_file
         self.dual_bgs_file = bgs_file
@@ -1507,13 +1508,16 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             index_zero_based: 0-based spectrum index (0 = first spectrum)
                                   For FITS files: automatically converted to 1-based extension number
         """
+        spec_kwargs = {}
+        if self.initial_redshift_column and issubclass(self.SpecClass, SpecEuclid1d):
+            spec_kwargs["initial_redshift_column"] = self.initial_redshift_column
         if self.speclist is not None:
             # For list of files: use 0-based index directly
             filename = self.speclist[index_zero_based]
-            spec = self.SpecClass(filename)
+            spec = self.SpecClass(filename, **spec_kwargs)
         else:
             # For multi-extension FITS: convert 0-based index to 1-based extension number
-            spec = self.SpecClass(self.specfile, ext=index_zero_based + 1)
+            spec = self.SpecClass(self.specfile, ext=index_zero_based + 1, **spec_kwargs)
         self._ensure_spec_defaults(spec)
         return spec
 
@@ -2192,8 +2196,17 @@ class PGSpecPlotEnhanced(pg.PlotWidget):
             if z_source == "z_vi":
                 parts.append("z_source: z_vi")
             elif z_source not in (None, ""):
-                z_source_str = _fmt_z(str(z_source), getattr(spec, str(z_source), None), hide_zero=False)
+                z_source_value = (
+                    getattr(spec, "_preferred_redshift_value", None)
+                    if z_source == self.initial_redshift_column
+                    else getattr(spec, str(z_source), None)
+                )
+                z_source_str = _fmt_z(str(z_source), z_source_value, hide_zero=False)
                 parts.append(f"z_source: {z_source_str or z_source}")
+            if self.initial_redshift_column and self.initial_redshift_column != "z_hybrid":
+                z_hybrid_str = _fmt_z("z_hybrid", getattr(spec, "z_hybrid", None), hide_zero=False)
+                if z_hybrid_str is not None:
+                    parts.append(z_hybrid_str)
         elif not self._is_aimsz_review:
             z_ref_str = _fmt_z("z_ref", getattr(spec, "z_ref", None), hide_zero=False)
             if z_ref_str is not None:
@@ -2730,7 +2743,7 @@ class PGSpecPlotAppEnhanced(QApplication):
                  enable_background_prefetch=None,
                  rgs_file=None, bgs_file=None, ext=None, extname=None,
                  dual_good_pixels_only=False, external_redshift_lookup=None,
-                 external_redshift_key="object_id"):
+                 external_redshift_key="object_id", initial_redshift_column=None):
         super().__init__(sys.argv)
         self.output_file = output_file
         self.spectra = spectra
@@ -2755,6 +2768,7 @@ class PGSpecPlotAppEnhanced(QApplication):
         self._dual_mode = bool(self.rgs_file and self.bgs_file)
         self.external_redshift_lookup = dict(external_redshift_lookup or {})
         self.external_redshift_key = str(external_redshift_key or "object_id")
+        self.initial_redshift_column = initial_redshift_column
 
         if load_history and os.path.exists(self.output_file):
             print(f"Loading history from {self.output_file} ...")
@@ -2794,7 +2808,8 @@ class PGSpecPlotAppEnhanced(QApplication):
             extname=self.dual_extname,
             dual_good_pixels_only=self.dual_good_pixels_only,
             external_redshift_lookup=self.external_redshift_lookup,
-            external_redshift_key=self.external_redshift_key)
+            external_redshift_key=self.external_redshift_key,
+            initial_redshift_column=self.initial_redshift_column)
         self.plot._session_reviewer = self._session_reviewer
         self.len_list = self.plot.len_list
         self.plot.current_spec_changed.connect(self.on_current_spec_changed)
